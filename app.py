@@ -663,19 +663,63 @@ def render_file_loader():
             st.error("다음 필수 파일을 모두 업로드해 주세요: " + ", ".join(missing))
             return
 
-        # 바이트로 세션에 저장
-        ss["bulk_csv_bytes"] = bulk_file.read()
-        ss["prod_xlsx_bytes"] = prod_file.read()
-        ss["recv_xlsx_bytes"] = recv_file.read()
-        ss["stock_xlsx_bytes"] = stock_file.read()
+        # ---------- 1) 업로드 파일을 바이트로 읽어서 세션에 저장 ----------
+        bulk_bytes = bulk_file.read()
+        prod_bytes = prod_file.read()
+        recv_bytes = recv_file.read()
+        stock_bytes = stock_file.read()
+        move_bytes = move_file.read() if move_file is not None else None
 
-        if move_file is not None:
-            ss["move_log_csv_bytes"] = move_file.read()
+        ss["bulk_csv_bytes"] = bulk_bytes
+        ss["prod_xlsx_bytes"] = prod_bytes
+        ss["recv_xlsx_bytes"] = recv_bytes
+        ss["stock_xlsx_bytes"] = stock_bytes
+        if move_bytes is not None:
+            ss["move_log_csv_bytes"] = move_bytes
 
+        # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
+        try:
+            _load_drums_core.clear()
+            df_bulk = _load_drums_core(bulk_bytes)
+            df_bulk.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+
+        try:
+            _load_production_core.clear()
+            df_prod = _load_production_core(prod_bytes)
+            df_prod.to_excel(PRODUCTION_FILE, index=False)
+        except Exception:
+            pass
+
+        try:
+            _load_receive_core.clear()
+            df_recv = _load_receive_core(recv_bytes)
+            df_recv.to_excel(RECEIVE_FILE, index=False)
+        except Exception:
+            pass
+
+        try:
+            _load_stock_core.clear()
+            df_stock = _load_stock_core(stock_bytes)
+            df_stock.to_excel(STOCK_FILE, index=False)
+        except Exception:
+            pass
+
+        if move_bytes is not None:
+            try:
+                _load_move_log_core.clear()
+                df_move = _load_move_log_core(move_bytes)
+                df_move.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+            except Exception:
+                pass
+
+        # ---------- 3) 플래그 세팅 후 메인으로 ----------
         ss["data_initialized"] = True
 
         st.success("파일 업로드가 완료되었습니다. 메인 화면으로 이동합니다.")
         st.rerun()
+
 
 
 # ==============================
