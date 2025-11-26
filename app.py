@@ -5,6 +5,7 @@ from datetime import datetime, date
 import io
 import math
 import tempfile
+from webcam_component.webcam_component import webcam_component
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -963,17 +964,21 @@ def render_tab_move():
     scan_col, _ = st.columns([1.2, 3])
 
     with scan_col:
-        st.caption("📷 라벨 사진 업로드 (모바일은 '카메라 촬영' 선택 가능)")
+        st.caption("📷 카메라로 바코드를 촬영해 주세요")
 
-        # 파일 업로드 (모바일에서는 '카메라 촬영' 옵션이 자동으로 등장)
-        scan_file = st.file_uploader(
-            "바코드 이미지 업로드",
-            type=["png", "jpg", "jpeg"],
-            key="mv_barcode_image",
-        )
+        img_raw = webcam_component(key="mv_webcam")
 
-        image_bytes = None
-        image_name = None
+        if img_raw is not None:
+            st.image(img_raw, caption="촬영된 원본", width=300)
+
+            codes = dbr_decode(img_raw)
+
+        if codes:
+            _, text_code = codes[0]
+            st.session_state["mv_scanned_barcode"] = text_code.strip()
+            st.success(f"인식됨: {text_code}")
+        else:
+            st.warning("바코드를 인식하지 못했습니다.")
 
         # 업로드 이미지가 있을 경우
         if scan_file is not None:
