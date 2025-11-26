@@ -1544,6 +1544,13 @@ def render_tab_lookup():
     else:
         df_view = df
 
+        # 🔍 용량 0 제외 체크박스 추가
+    exclude_zero = st.checkbox("용량 0 제외", value=False)
+
+    if exclude_zero:
+        df_view = df_view[df_view["통용량"] > 0]
+
+
     if df_view.empty:
         st.warning("검색 결과가 없습니다.")
         return
