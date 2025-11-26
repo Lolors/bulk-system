@@ -1541,10 +1541,10 @@ def render_tab_map():
 
 
 # ==============================
-# 탭 4: 이동 이력
+# 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
 def render_tab_move_log():
-    st.markdown("### 📜 이동 이력")
+    st.markdown("### 📜 이동 이력 (수정 / 삭제 가능)")
 
     df = load_move_log()
     if df.empty:
@@ -1555,6 +1555,11 @@ def render_tab_move_log():
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_page", 1)
 
+    # ▶ 검색 초기화 콜백 (여기서만 state 수정)
+    def reset_log_filter():
+        ss["log_lot_filter"] = ""
+        ss["log_page"] = 1
+
     col1, col2 = st.columns([3, 1])
     with col1:
         lot_filter = st.text_input(
@@ -1563,11 +1568,9 @@ def render_tab_move_log():
             placeholder="예: 2E075K",
         )
     with col2:
-        if st.button("검색 초기화", key="log_reset"):
-            ss["log_lot_filter"] = ""
-            ss["log_page"] = 1
-            lot_filter = ""
+        st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
+    # 필터 적용
     if lot_filter:
         mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
         df_view = df[mask].copy()
@@ -1578,8 +1581,10 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
+    # 시간 내림차순 정렬
     df_view = df_view.sort_values("시간", ascending=False)
 
+    # --- 페이지네이션 ---
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
@@ -1600,6 +1605,7 @@ def render_tab_move_log():
     end = start + page_size
     page_df = df_view.iloc[start:end].copy()
 
+    # 표시/편집할 컬럼 + 삭제 체크박스 컬럼 추가
     cols_order = [
         "시간",
         "ID",
@@ -1615,7 +1621,73 @@ def render_tab_move_log():
     ]
     page_df = page_df[cols_order]
 
-    st.dataframe(page_df, use_container_width=True)
+    delete_col = "삭제"
+    if delete_col not in page_df.columns:
+        page_df[delete_col] = False
+
+    st.caption(
+        "※ '시간'과 'ID'는 수정할 수 없습니다. "
+        "나머지 칼럼은 수정 가능하며, '삭제' 체크 후 '선택 행 삭제'를 누르면 해당 행이 삭제됩니다."
+    )
+
+    edited_page = st.data_editor(
+        page_df,
+        use_container_width=True,
+        disabled=["시간", "ID"],   # 이 두 컬럼은 수정 불가
+        column_config={
+            delete_col: st.column_config.CheckboxColumn("삭제", help="삭제할 행에 체크"),
+        },
+        key=f"move_log_editor_page_{ss['log_page']}",
+    )
+
+    # 공통 저장 함수
+    def _save_full_log(df_updated: pd.DataFrame):
+        buf = io.BytesIO()
+        df_updated.to_csv(buf, index=False, encoding="utf-8-sig")
+        ss["move_log_csv_bytes"] = buf.getvalue()
+        _load_move_log_core.clear()
+        try:
+            df_updated.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+
+    col_save, col_delete = st.columns(2)
+
+    # ✅ 내용 수정 저장
+    with col_save:
+        if st.button("변경 내용 저장", key="log_save_changes"):
+            try:
+                df_updated = df.copy()
+
+                if delete_col in edited_page.columns:
+                    edited_for_update = edited_page.drop(columns=[delete_col])
+                else:
+                    edited_for_update = edited_page
+
+                df_updated.update(edited_for_update)
+                _save_full_log(df_updated)
+                st.success("이동 이력 변경 내용이 저장되었습니다.")
+            except Exception as e:
+                st.error(f"변경 내용을 저장하는 중 오류가 발생했습니다: {e}")
+
+    # 🗑 선택 행 삭제
+    with col_delete:
+        if st.button("선택 행 삭제", key="log_delete_rows"):
+            try:
+                if delete_col in edited_page.columns:
+                    to_del_idx = edited_page[edited_page[delete_col] == True].index
+                else:
+                    to_del_idx = []
+
+                if len(to_del_idx) == 0:
+                    st.warning("삭제할 행을 먼저 '삭제' 칼럼에 체크해 주세요.")
+                else:
+                    df_updated = df.drop(index=to_del_idx)
+                    _save_full_log(df_updated)
+                    st.success(f"총 {len(to_del_idx)}개 행이 삭제되었습니다.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"행을 삭제하는 중 오류가 발생했습니다: {e}")
 
 
 # ==============================
