@@ -926,67 +926,86 @@ def render_tab_move():
     # ================== 2줄: 바코드 스캔 업로드 (절반 너비) ==================
     st.write("")
 
-    scan_col, empty_col = st.columns([1.2, 3])# 카메라 켜기 상태값
-if "mv_camera_on" not in st.session_state:
-    st.session_state["mv_camera_on"] = False
+    # 카메라 켜기 상태값
+    if "mv_camera_on" not in st.session_state:
+        st.session_state["mv_camera_on"] = False
 
-scan_col, _ = st.columns([1.2, 3])
+    scan_col, _ = st.columns([1.2, 3])
 
-with scan_col:
-    st.caption("📷 모바일은 카메라 촬영, PC는 이미지 업로드를 사용하세요.")
+    with scan_col:
+        st.caption("📷 모바일은 카메라 촬영, PC는 이미지 업로드를 사용하세요.")
 
-    # 🔘 1) 카메라 켜기 / 끄기 버튼
-    if not st.session_state["mv_camera_on"]:
-        if st.button("카메라 켜기"):
-            st.session_state["mv_camera_on"] = True
-            st.rerun()
-    else:
-        if st.button("카메라 끄기"):
-            st.session_state["mv_camera_on"] = False
-            st.rerun()
+        # 🔘 1) 카메라 켜기 / 끄기 버튼
+        if not st.session_state["mv_camera_on"]:
+            if st.button("카메라 켜기"):
+                st.session_state["mv_camera_on"] = True
+                st.rerun()
+        else:
+            if st.button("카메라 끄기"):
+                st.session_state["mv_camera_on"] = False
+                st.rerun()
 
-    # 🔍 2) 카메라가 켜진 상태에서만 camera_input 표시
-    cam_image = None
-    if st.session_state["mv_camera_on"]:
-        cam_image = st.camera_input(
-            "📷 라벨 촬영",
-            key="mv_barcode_camera"
+        # 🔍 2) 카메라가 켜진 상태에서만 camera_input 표시
+        cam_image = None
+        if st.session_state["mv_camera_on"]:
+            cam_image = st.camera_input(
+                "📷 라벨 촬영",
+                key="mv_barcode_camera"
+            )
+
+        # 🖼 3) 기존 이미지 업로드 (PC 및 선택용)
+        scan_file = st.file_uploader(
+            "이미지 파일 업로드",
+            type=["png", "jpg", "jpeg"],
+            key="mv_barcode_image",
         )
 
-    # 🖼 3) 기존 이미지 업로드 (PC 및 선택용)
-    scan_file = st.file_uploader(
-        "이미지 파일 업로드",
-        type=["png", "jpg", "jpeg"],
-        key="mv_barcode_image",
-    )
+        # 📌 우선순위 = 카메라 → 파일 업로드
+        image_bytes = None
+        image_name = None
 
-    # 📌 우선순위 = 카메라 → 파일 업로드
-    image_bytes = None
-    image_name = None
+        if cam_image is not None:
+            image_bytes = cam_image.getvalue()
+            image_name = "camera_capture.png"
+        elif scan_file is not None:
+            image_bytes = scan_file.read()
+            image_name = scan_file.name
 
-    if cam_image is not None:
-        image_bytes = cam_image.getvalue()
-        image_name = "camera_capture.png"
-    elif scan_file is not None:
-        image_bytes = scan_file.read()
-        image_name = scan_file.name
+        # 📦 DBR 디코딩
+        if image_bytes is not None:
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+                st.image(img, caption=image_name, width=220)
 
-    # 📦 DBR 디코딩
-    if image_bytes is not None:
-        try:
-            img = Image.open(io.BytesIO(image_bytes))
-            st.image(img, caption=image_name, width=220)
+                codes = dbr_decode(img)
+                if codes:
+                    _, text_code = codes[0]
+                    st.session_state["mv_scanned_barcode"] = text_code.strip()
+                    st.success(f"인식됨: {text_code}")
+                else:
+                    st.warning("바코드를 인식하지 못했습니다.")
 
-            codes = dbr_decode(img)
-            if codes:
-                _, text_code = codes[0]
-                st.session_state["mv_scanned_barcode"] = text_code.strip()
-                st.success(f"인식됨: {text_code}")
-            else:
-                st.warning("바코드를 인식하지 못했습니다.")
+            except Exception as e:
+                st.error(f"이미지를 처리하는 중 오류 발생: {e}")
 
-        except Exception as e:
-            st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+    # ================== 3줄: 조회 / 초기화 버튼 ==================
+    st.write("")
+    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
+
+    search_clicked = False
+    with btn_col1:
+        if st.button("조회하기", key="mv_search_btn_csv"):
+            search_clicked = True
+
+    with btn_col2:
+        st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+
+    # 조회 버튼 처리
+    if search_clicked:
+        # 👉 여기 아래에 기존 조회 로직 붙이면 됨
+        # ex) run_move_search()
+        pass
+
 
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
