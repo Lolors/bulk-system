@@ -2,4 +2,6 @@ streamlit
 pandas
 openpyxl
 Pillow
+
 dynamsoft-barcode-reader-bundle
+boto3
