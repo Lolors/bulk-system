@@ -907,7 +907,7 @@ def render_tab_move():
     # ================== 상단 입력 ==================
 
     # 1줄: 작업번호/입하번호 + 로트번호 (기존 그대로)
-    col_in1, col_in2, _sp = st.columns([0.4, 0.4, 2.5])
+    col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
 
     with col_in1:
         barcode = st.text_input(
