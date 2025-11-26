@@ -5,6 +5,9 @@ from datetime import datetime, date
 import io
 import math
 import tempfile
+from google.cloud import vision
+from google.oauth2 import service_account
+import re
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -247,7 +250,25 @@ def dbr_decode(pil_img):
             except Exception:
                 pass
 
+# ==============================
+# Google Cloud Vision OCR
+# ==============================
+_VISION_CLIENT = None
 
+def get_vision_client():
+    """st.secrets에 저장된 서비스 계정 정보를 이용해 Vision 클라이언트 생성."""
+    global _VISION_CLIENT
+    if _VISION_CLIENT is not None:
+        return _VISION_CLIENT
+
+    info = st.secrets.get("gcp_service_account", None)
+    if not info:
+        st.warning("gcp_service_account 시크릿을 찾을 수 없습니다.")
+        return None
+
+    creds = service_account.Credentials.from_service_account_info(dict(info))
+    _VISION_CLIENT = vision.ImageAnnotatorClient(credentials=creds)
+    return _VISION_CLIENT
 
 # ==============================
 # 공통 유틸 (업로드/로컬 겸용)
