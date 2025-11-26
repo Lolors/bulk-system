@@ -42,6 +42,34 @@ MOVE_LOG_CSV = "bulk_move_log.csv"     # 이동 이력
 RECEIVE_FILE = "receive.xlsx"          # 사급: 입하번호 기반
 STOCK_FILE = "stock.xlsx"              # 전산 재고
 
+# ==============================
+# S3 연동 설정
+# ==============================
+import boto3
+
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "bulk-system-enc")
+S3_PREFIX = os.getenv("S3_PREFIX", "bulk-app/")  # 폴더 경로
+
+def s3_enabled() -> bool:
+    return bool(S3_BUCKET_NAME)
+
+@st.cache_resource(show_spinner=False)
+def get_s3_client():
+    try:
+        session = boto3.session.Session()
+        client = session.client("s3")
+        return client
+    except Exception:
+        return None
+
+def _s3_key(filename: str) -> str:
+    """
+    S3에서 저장되는 경로를 결정.
+    예: filename="bulk_drums_extended.csv" → "bulk-app/bulk_drums_extended.csv"
+    """
+    prefix = S3_PREFIX.rstrip("/")
+    return f"{prefix}/{filename}" if prefix else filename
+
 
 # ==============================
 # 바코드 인식 (Dynamsoft DBR 전용 - CaptureVisionRouter 사용)
@@ -605,23 +633,43 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
     except Exception:
         pass
 
+# ==============================
+# 업로드 시간 표시 유틸  (S3 → 로컬 순으로 확인)
+# ==============================
+from datetime import datetime
 
-# ==============================
-# 업로드 시간 표시 유틸
-# ==============================
-def last_upload_caption(path: str) -> str:
+def last_upload_caption(filename: str) -> str:
     """
-    파일의 실제 수정 시간(mtime)을 기반으로 마지막 업로드 시간을 반환.
-    파일이 없으면 '없음' 표시.
+    1) S3 객체가 있으면 그 객체의 LastModified 시간을 표시
+    2) 없으면 로컬 파일 수정시간을 표시
+    3) 둘 다 없으면 '업로드된 파일 없음'
     """
-    if os.path.exists(path):
+    # 1) S3 LastModified -----------------------------------------
+    try:
+        if s3_enabled():
+            client = get_s3_client()
+            if client:
+                s3_path = _s3_key(filename)
+                resp = client.head_object(Bucket=S3_BUCKET_NAME, Key=s3_path)
+                lm = resp["LastModified"]  # timezone aware datetime
+                ts_str = lm.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                return f"S3 마지막 수정: {ts_str}"
+    except Exception:
+        pass
+
+    # 2) 로컬 파일 mtime -----------------------------------------
+    if os.path.exists(filename):
         try:
-            ts = os.path.getmtime(path)  # Unix timestamp
+            ts = os.path.getmtime(filename)
             dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-            return f"마지막 수정: {dt}"
+            return f"로컬 마지막 수정: {dt}"
         except Exception:
-            return "마지막 수정 시간을 읽을 수 없음"
-    return "파일이 아직 존재하지 않습니다."
+            return "로컬 파일 시간 읽기 오류"
+
+    # 3) 둘 다 없음 ----------------------------------------------
+    return "업로드된 파일이 없습니다."
+
+
 
 # ==============================
 # 데이터 파일 업로드 화면 (최초 1회용)
@@ -647,28 +695,28 @@ def render_file_loader():
             type=["csv"],
             key="first_up_bulk",
         )
-        st.caption(last_upload_caption("last_upload_bulk"))
+        st.caption(last_upload_caption(CSV_PATH))
 
         prod_file = st.file_uploader(
             "2) production.xlsx (필수)",
             type=["xlsx"],
             key="first_up_prod",
         )
-        st.caption(last_upload_caption("last_upload_prod"))
+        st.caption(last_upload_caption(PRODUCTION_FILE))
 
         recv_file = st.file_uploader(
             "3) receive.xlsx (필수)",
             type=["xlsx"],
             key="first_up_recv",
         )
-        st.caption(last_upload_caption("last_upload_recv"))
+        st.caption(last_upload_caption(RECEIVE_FILE))
 
         stock_file = st.file_uploader(
             "4) stock.xlsx (필수)",
             type=["xlsx"],
             key="first_up_stock",
         )
-        st.caption(last_upload_caption("last_upload_stock"))
+        st.caption(last_upload_caption(STOCK_FILE))
 
     with col_right:
         move_file = st.file_uploader(
@@ -676,7 +724,7 @@ def render_file_loader():
             type=["csv"],
             key="first_up_move",
         )
-        st.caption(last_upload_caption("last_upload_move"))
+        st.caption(last_upload_caption(MOVE_LOG_CSV))
         st.caption("※ 없으면 업로드 안 해도 됩니다. 새 로그로 시작해요.")
 
     if st.button("업로드 완료", key="first_upload_done"):
@@ -709,12 +757,12 @@ def render_file_loader():
             ss["move_log_csv_bytes"] = move_bytes
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ss["last_upload_bulk"] = now_str
-        ss["last_upload_prod"] = now_str
-        ss["last_upload_recv"] = now_str
-        ss["last_upload_stock"] = now_str
-        if move_bytes is not None:
-            ss["last_upload_move"] = now_str
+        st.caption(last_upload_caption(CSV_PATH))
+        st.caption(last_upload_caption(PRODUCTION_FILE))
+        st.caption(last_upload_caption(RECEIVE_FILE))
+        st.caption(last_upload_caption(STOCK_FILE))
+        st.caption(last_upload_caption(MOVE_LOG_CSV))
+
 
         # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
         try:
