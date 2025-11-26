@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, date
 import io
 import math
 
@@ -70,43 +70,6 @@ def _s3_key(filename: str) -> str:
     prefix = S3_PREFIX.rstrip("/")
     return f"{prefix}/{filename}" if prefix else filename
 
-# ==============================
-# TAT 계산
-# ==============================
-def calc_tat_months(mfg_value):
-    """
-    제조일자(mfg_value)를 받아 오늘 기준 경과 개월 수(TAT)를 계산.
-    - 날짜가 없거나 파싱 안 되면 None
-    - 포맷: datetime, Timestamp, 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY.MM.DD', 'YYYYMMDD' 정도 지원
-    """
-    if pd.isna(mfg_value):
-        return None
-
-    d = None
-
-    # 이미 datetime / Timestamp 인 경우
-    if isinstance(mfg_value, (datetime, pd.Timestamp)):
-        d = mfg_value.date()
-    else:
-        s = str(mfg_value).strip()
-        if not s:
-            return None
-
-        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
-            try:
-                d = datetime.strptime(s, fmt).date()
-                break
-            except ValueError:
-                continue
-
-    if d is None:
-        return None
-
-    today = date.today()
-    months = (today.year - d.year) * 12 + (today.month - d.month)
-    if months < 0:
-        months = 0
-    return months
 
 # ==============================
 # 바코드 인식 (Dynamsoft DBR 전용 - CaptureVisionRouter 사용)
@@ -486,7 +449,37 @@ def classify_product_line(item_code: str) -> str:
     if code in FACIAL_CODES:
         return "페이셜"
     return ""
+def add_tat_column(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    df에 'TAT' 컬럼을 추가해서 제조일자로부터 오늘까지 경과 개월 수를 채워준다.
+    - 제조일자가 비어있거나 파싱 불가하면 TAT는 <NA>
+    """
+    if "제조일자" not in df.columns:
+        df["TAT"] = pd.NA
+        return df
 
+    # 제조일자를 datetime으로 변환 (여러 포맷 허용)
+    mfg_dt = pd.to_datetime(df["제조일자"], errors="coerce")
+
+    # 오늘 날짜
+    today = date.today()
+
+    # 연/월 차이로 개월 수 계산
+    years_diff = today.year - mfg_dt.dt.year
+    months_diff = today.month - mfg_dt.dt.month
+    tat_months = years_diff * 12 + months_diff
+
+    # 음수 방지
+    tat_months = tat_months.clip(lower=0)
+
+    # 날짜 없는 곳은 NA로
+    tat_months = tat_months.where(~mfg_dt.isna(), pd.NA)
+
+    # nullable 정수로 저장
+    df = df.copy()
+    df["TAT"] = tat_months.astype("Int64")
+
+    return df
 
 def generate_drums(prod_qty_kg: float):
     """제조량(kg)을 받아서 통번호/용량을 자동 생성."""
@@ -1380,17 +1373,10 @@ def render_tab_lookup():
     if df.empty:
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
-
-    # ✅ 제조일자 기준 TAT(개월) 계산 컬럼 추가
-    try:
-        if "제조일자" in df.columns:
-            df["TAT"] = df["제조일자"].apply(calc_tat_months)
-        else:
-            df["TAT"] = None
-    except Exception:
-        # 혹시라도 문제 생겨도 조회 자체는 돌게
-        df["TAT"] = None
-
+        
+    # ✅ 제조일자 기준 TAT(개월) 컬럼 추가
+    df = add_tat_column(df)
+    
     query = st.text_input("로트번호, 품목코드 또는 현재위치를 입력해 주세요.")
     if query:
         q = query.strip()
