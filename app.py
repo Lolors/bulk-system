@@ -1147,42 +1147,52 @@ def render_tab_move():
     else:
         stock_loc_display = current_zone
 
-    col_left2, col_right2 = st.columns(2)
+col_left2, col_right2 = st.columns(2)
 
-    # ===== 왼쪽: 조회 정보 + 통 선택 =====
-    with col_left2:
-        st.markdown("### 🧾 조회 정보")
-        st.success("조회가 완료되었습니다.")
+with col_left2:
+    st.markdown("### 🧾 조회 정보")
+    st.success("조회가 완료되었습니다.")
 
-        st.markdown(
-            f"""
-            **벌크 구분:** {bulk_type}  
-            **식별값:** {barcode_used}  
-            **품목코드:** {item_code}  
-            **품명:** {item_name}  
-            **로트번호:** {lot}  
-            **제조일자:** {prod_date}  
-            """
-        )
+    st.markdown(
+        f"""
+        **벌크 구분:** {bulk_type}  
+        **식별값:** {barcode_used}  
+        **품목코드:** {item_code}  
+        **품명:** {item_name}  
+        **로트번호:** {lot}  
+        **제조일자:** {prod_date}  
+        """
+    )
 
-        # 현재 위치 + 상세보기/이동이력 버튼
-        loc_col1, loc_col2 = st.columns([3, 2])
-        with loc_col1:
-            st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
-        with loc_col2:
-            b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
-            with b1_col:
-                if stock_summary_df is not None and not stock_summary_df.empty:
-                    if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
-                        ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
-            with b2_col:
-                if st.button("이동이력", key=f"move_hist_btn_{lot}"):
-                    ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
+    # 현재 위치 + [상세보기] + [이동이력] 버튼
+    loc_col1, loc_col2 = st.columns([3, 2])
+    with loc_col1:
+        st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+    with loc_col2:
+        b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
+        with b1_col:
+            if stock_summary_df is not None and not stock_summary_df.empty:
+                if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
+                    ss["mv_show_stock_detail"] = not ss.get(
+                        "mv_show_stock_detail", False
+                    )
+        with b2_col:
+            if st.button("이동이력", key=f"move_hist_btn_{lot}"):
+                ss["mv_show_move_history_here"] = not ss.get(
+                    "mv_show_move_history_here", False
+                )
 
-        if ss.get("mv_show_stock_detail", False) and stock_summary_df is not None:
-            st.dataframe(stock_summary_df, use_container_width=True, height=240)
+    # 🔎 전산 재고 상세표 토글
+    if (
+        ss.get("mv_show_stock_detail", False)
+        and stock_summary_df is not None
+        and not stock_summary_df.empty
+    ):
+        st.markdown("#### 🔎 전산 재고 상세")
+        st.dataframe(stock_summary_df, use_container_width=True, height=240)
 
-        st.markdown("### 🛢 통 선택 및 잔량 입력")
+    st.markdown("### 🛢 통 선택 및 잔량 입력")
+
 
         selected_drums = []
         drum_new_qty = {}
