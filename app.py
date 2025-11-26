@@ -5,7 +5,6 @@ from datetime import datetime, date
 import io
 import math
 import tempfile
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -958,15 +957,14 @@ def render_tab_move():
             placeholder="예: 2E075K",
         )
 
-# ================== 바코드 스캔 업로드 (카메라 입력 없음) ==================
+    # ================== 바코드 스캔 업로드 ==================
     st.write("")
 
     scan_col, _ = st.columns([1.2, 3])
 
     with scan_col:
-        st.caption("📷 라벨 사진 업로드 (모바일은 '카메라 촬영' 선택 가능)")
+        st.caption("📷 라벨 사진 업로드 (모바일은 촬영 후 '사진에서 선택' 권장)")
 
-        # 파일 업로드 (모바일에서는 '카메라 촬영' 옵션이 자동으로 등장)
         scan_file = st.file_uploader(
             "바코드 이미지 업로드",
             type=["png", "jpg", "jpeg"],
@@ -976,12 +974,11 @@ def render_tab_move():
         image_bytes = None
         image_name = None
 
-        # 업로드 이미지가 있을 경우
         if scan_file is not None:
             image_bytes = scan_file.read()
             image_name = scan_file.name
 
-    # ================== DBR 디코딩 (파일 업로드) ==================
+        # ================== DBR 디코딩 ==================
         if image_bytes is not None:
             try:
                 img_raw = Image.open(io.BytesIO(image_bytes))
@@ -1000,54 +997,6 @@ def render_tab_move():
 
             except Exception as e:
                 st.error(f"이미지를 처리하는 중 오류 발생: {e}")
-
-
-    # ================== 고해상도 WebRTC 카메라 방식 ==================
-    st.write("")  # 블록 간 여백
-    st.subheader("📷 고해상도 카메라 촬영 (WebRTC)")
-
-    class BarcodeCapture(VideoTransformerBase):
-        def __init__(self):
-            self.last_frame = None
-
-        def transform(self, frame):
-            # 최신 프레임 저장 + 화면에는 그대로 보여줌
-            self.last_frame = frame
-            return frame
-
-    ctx = webrtc_streamer(
-        key="highres_cam",
-        video_transformer_factory=BarcodeCapture,
-        media_stream_constraints={
-            "video": {
-                "width": {"ideal": 1920},
-                "height": {"ideal": 1080},
-                "facingMode": "environment",
-            },
-            "audio": False,
-        },
-    )
-
-    capture_clicked = st.button("📸 이 화면으로 촬영", key="mv_capture_webrtc")
-
-    if capture_clicked:
-        if ctx and ctx.video_transformer and ctx.video_transformer.last_frame is not None:
-            frame = ctx.video_transformer.last_frame
-            img_raw = frame.to_image()
-
-            st.image(img_raw, caption="촬영된 원본", width=300)
-
-            codes = dbr_decode(img_raw)
-            if codes:
-                _, text_code = codes[0]
-                text_code = text_code.strip()
-                st.session_state["mv_scanned_barcode"] = text_code
-                st.success(f"인식됨: {text_code}")
-            else:
-                st.error("바코드를 인식하지 못했습니다.")
-        else:
-            st.warning("아직 카메라 영상이 준비되지 않았습니다. 1~2초 후에 다시 눌러 주세요.")
-
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
     st.write("")
