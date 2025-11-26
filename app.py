@@ -1036,7 +1036,7 @@ def render_tab_move():
     scan_col, _ = st.columns([1.2, 3])
 
     with scan_col:
-        st.caption("📷 라벨 사진 업로드 (모바일은 촬영 후 '사진에서 선택' 권장)")
+        st.caption("📷 라벨 사진 업로드")
 
         scan_file = st.file_uploader(
             "바코드 이미지 업로드",
