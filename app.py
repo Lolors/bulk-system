@@ -904,64 +904,60 @@ def render_tab_move():
     )
     barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-    # ================== 상단 입력 & 바코드 스캔 (한 줄) ==================
+    # ================== 상단 레이아웃 ==================
+    # 1줄: [작업번호/입하번호] | [로트번호] | [바코드 스캔]
+    col_barc, col_lot, col_scan = st.columns([1.3, 1, 1.8])
 
-    col_in1, col_in2, col_scan = st.columns([1, 1, 1.2])
-
-    # 작업번호 / 입하번호 입력
-    with col_in1:
+    with col_barc:
         barcode = st.text_input(
             barcode_label,
             key="mv_barcode",
             placeholder="예: W24012345",
         )
 
-    # 로트번호 입력
-    with col_in2:
+    with col_lot:
         lot_input = st.text_input(
-            "로트번호",
+            "로트번호를 입력해 주세요.",
             key="mv_lot",
             placeholder="예: 2E075K",
         )
 
-    # 바코드 스캔 업로드 (너비 동일)
     with col_scan:
-        st.caption("라벨 사진 업로드 (선택)")
+        st.caption("라벨 사진을 업로드해 바코드를 인식할 수 있습니다.")
         scan_file = st.file_uploader(
-            "바코드 인식",
+            "바코드 라벨 사진 업로드 (선택)",
             type=["png", "jpg", "jpeg"],
             key="mv_barcode_image",
         )
-
         if scan_file is not None:
             if Image is None or CaptureVisionRouter is None or LicenseManager is None:
-                st.error("바코드 인식 라이브러리가 없습니다.")
+                st.error("바코드 인식에 필요한 라이브러리가 설치되어 있지 않습니다.")
             else:
                 try:
                     img = Image.open(io.BytesIO(scan_file.read()))
-                    st.image(img, caption=scan_file.name, width=220)
+                    st.image(img, caption=scan_file.name, width=260)
                     codes = dbr_decode(img)
                     if codes:
                         _, text_code = codes[0]
-                        ss["mv_scanned_barcode"] = text_code.strip()
-                        st.success(f"인식됨: {text_code}")
+                        text_code = (text_code or "").strip()
+                        ss["mv_scanned_barcode"] = text_code
+                        st.success(f"바코드 인식 결과: {text_code}")
                     else:
                         st.warning("바코드를 인식하지 못했습니다.")
                 except Exception as e:
-                    st.error(f"이미지 처리 오류: {e}")
+                    st.error(f"이미지를 처리하는 중 오류가 발생했습니다: {e}")
 
+    st.write("")  # 위/아래 간단한 여백
 
-    # ================== 조회/초기화 버튼 ==================
-    st.write("")  # 약간의 간격
-    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
-
+    # 2줄: [조회하기] [초기화] 버튼
+    btn_col1, btn_col2, _btn_sp = st.columns([0.6, 0.6, 3])
     search_clicked = False
     with btn_col1:
         if st.button("조회하기", key="mv_search_btn_csv"):
             search_clicked = True
-
     with btn_col2:
         st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+
 
 
     # 조회 버튼 처리
