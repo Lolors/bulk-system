@@ -1096,16 +1096,18 @@ def render_tab_move():
                     st.info(f"이미 인식된 바코드: {ss['mv_scanned_barcode']}")
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
-    st.write("")
-    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
+    # st.write("")  # 👈 여백 없애고 싶으면 이 줄을 지워
+
+    btn_col1, btn_col2 = st.columns([1, 1])  # 👈 세 번째 빈 column 제거
 
     search_clicked = False
     with btn_col1:
-        if st.button("조회하기", key="mv_search_btn_csv"):
+        if st.button("조회하기", key="mv_search_btn_csv", use_container_width=True):
             search_clicked = True
 
     with btn_col2:
-        st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+       st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs, use_container_width=True)
+
 
 
     # 조회 버튼 처리
