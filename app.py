@@ -31,7 +31,6 @@ st.markdown(
         max-width: 160px !important;
         min-width: 160px !important;
     }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -68,9 +67,10 @@ except ImportError:
     EnumPresetTemplate = None
     EnumErrorCode = None
 
-# 라이선스 키 (지금 쓰는 그대로)
-DBR_LICENSE = st.secrets["DBR_LICENSE"]
-
+# 라이선스 키
+DBR_LICENSE = (
+    "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng"
+)
 
 _DBR_CVR = None
 _DBR_LICENSE_INIT = False
@@ -172,30 +172,51 @@ def dbr_decode(pil_img):
 
 
 # ==============================
-# 공통 유틸
+# 공통 유틸 (업로드/로컬 겸용)
 # ==============================
 @st.cache_data(show_spinner=False)
-def load_drums() -> pd.DataFrame:
-    """bulk_drums_extended.csv 로드."""
-    if not os.path.exists(CSV_PATH):
-        return pd.DataFrame(
-            columns=[
-                "품목코드",
-                "품명",
-                "로트번호",
-                "제품라인",
-                "제조일자",
-                "상태",
-                "통번호",
-                "통용량",
-                "현재위치",
-            ]
-        )
-
-    try:
-        df = pd.read_csv(CSV_PATH)
-    except Exception as e:
-        st.error(f"CSV 파일을 읽는 중 오류가 발생했습니다: {e}")
+def _load_drums_core(bulk_bytes):
+    """bulk_drums_extended.csv 로드 (세션 업로드 우선, 없으면 로컬 파일)."""
+    # 1) 세션에 업로드된 파일이 있으면 그걸 우선 사용
+    if bulk_bytes is not None:
+        try:
+            df = pd.read_csv(io.BytesIO(bulk_bytes))
+        except Exception as e:
+            st.error(f"업로드한 bulk_drums_extended.csv를 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame(
+                columns=[
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
+                ]
+            )
+    # 2) 업로드 파일이 없고, 로컬 CSV가 있으면 그걸 사용
+    elif os.path.exists(CSV_PATH):
+        try:
+            df = pd.read_csv(CSV_PATH)
+        except Exception as e:
+            st.error(f"CSV 파일을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame(
+                columns=[
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
+                ]
+            )
+    # 3) 둘 다 없으면 빈 DF
+    else:
         return pd.DataFrame(
             columns=[
                 "품목코드",
@@ -243,42 +264,111 @@ def load_drums() -> pd.DataFrame:
     return df
 
 
+def load_drums() -> pd.DataFrame:
+    """세션 상태를 감안해서 bulk DF를 가져오는 외부용 함수."""
+    ss = st.session_state
+    bulk_bytes = ss.get("bulk_csv_bytes", None)
+    return _load_drums_core(bulk_bytes)
+
+
 def save_drums(df: pd.DataFrame):
-    """현재 DF를 bulk_drums_extended.csv에 그대로 저장"""
-    load_drums.clear()  # 캐시 무효화
-    df.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
+    """
+    현재 DF를 bulk_drums_extended.csv로 저장.
+    - 세션 메모리(업로드 방식) 갱신
+    - 로컬 파일도 있으면 덮어쓰기 (로컬 실행용)
+    """
+    # 1) 세션 메모리 갱신
+    buf = io.BytesIO()
+    df.to_csv(buf, index=False, encoding="utf-8-sig")
+    st.session_state["bulk_csv_bytes"] = buf.getvalue()
+
+    # 캐시 무효화
+    _load_drums_core.clear()
+
+    # 2) 로컬 CSV로도 저장 (있으면)
+    try:
+        df.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
+    except Exception:
+        # Cloud 환경에서는 보통 권한/경로가 없으니 조용히 무시
+        pass
 
 
 @st.cache_data(show_spinner=False)
-def load_production():
-    """production.xlsx 로드 (자사 작업번호용)"""
-    if not os.path.exists(PRODUCTION_FILE):
-        return pd.DataFrame()
-
-    try:
-        df = pd.read_excel(PRODUCTION_FILE)
-    except Exception:
+def _load_production_core(prod_bytes):
+    if prod_bytes is not None:
+        try:
+            df = pd.read_excel(io.BytesIO(prod_bytes))
+        except Exception:
+            return pd.DataFrame()
+    elif os.path.exists(PRODUCTION_FILE):
+        try:
+            df = pd.read_excel(PRODUCTION_FILE)
+        except Exception:
+            return pd.DataFrame()
+    else:
         return pd.DataFrame()
 
     required = ["작업번호", "품번", "품명", "LOTNO", "지시수량", "제조량", "작업일자"]
     for c in required:
         if c not in df.columns:
             return pd.DataFrame()
-
     return df[required].copy()
 
 
+def load_production():
+    ss = st.session_state
+    prod_bytes = ss.get("prod_xlsx_bytes", None)
+    return _load_production_core(prod_bytes)
+
+
 @st.cache_data(show_spinner=False)
-def load_receive():
-    """receive.xlsx 로드 (사급 입하번호용)"""
-    if not os.path.exists(RECEIVE_FILE):
-        return pd.DataFrame()
-    try:
-        df = pd.read_excel(RECEIVE_FILE)
-    except Exception as e:
-        st.error(f"receive.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
+def _load_receive_core(recv_bytes):
+    if recv_bytes is not None:
+        try:
+            df = pd.read_excel(io.BytesIO(recv_bytes))
+        except Exception as e:
+            st.error(f"receive.xlsx 파일(업로드)을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame()
+    elif os.path.exists(RECEIVE_FILE):
+        try:
+            df = pd.read_excel(RECEIVE_FILE)
+        except Exception as e:
+            st.error(f"receive.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame()
+    else:
         return pd.DataFrame()
     return df
+
+
+def load_receive():
+    ss = st.session_state
+    recv_bytes = ss.get("recv_xlsx_bytes", None)
+    return _load_receive_core(recv_bytes)
+
+
+@st.cache_data(show_spinner=False)
+def _load_stock_core(stock_bytes):
+    if stock_bytes is not None:
+        try:
+            df = pd.read_excel(io.BytesIO(stock_bytes))
+        except Exception as e:
+            st.error(f"stock.xlsx 파일(업로드)을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame()
+    elif os.path.exists(STOCK_FILE):
+        try:
+            df = pd.read_excel(STOCK_FILE)
+        except Exception as e:
+            st.error(f"stock.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame()
+    else:
+        return pd.DataFrame()
+    return df
+
+
+def load_stock() -> pd.DataFrame:
+    ss = st.session_state
+    stock_bytes = ss.get("stock_xlsx_bytes", None)
+    return _load_stock_core(stock_bytes)
 
 
 # ==============================
@@ -386,10 +476,10 @@ def ensure_lot_in_csv(
 
 
 # ==============================
-# 이동 LOG 유틸 (ID 포함)
+# 이동 LOG 유틸 (ID 포함, 업로드/세션 겸용)
 # ==============================
 @st.cache_data(show_spinner=False)
-def load_move_log() -> pd.DataFrame:
+def _load_move_log_core(move_bytes):
     """이동 이력 CSV 로드."""
     default_cols = [
         "시간",
@@ -405,13 +495,19 @@ def load_move_log() -> pd.DataFrame:
         "변경 후 위치",
     ]
 
-    if not os.path.exists(MOVE_LOG_CSV):
-        return pd.DataFrame(columns=default_cols)
-
-    try:
-        df = pd.read_csv(MOVE_LOG_CSV)
-    except Exception as e:
-        st.error(f"이동 이력 파일을 읽는 중 오류가 발생했습니다: {e}")
+    if move_bytes is not None:
+        try:
+            df = pd.read_csv(io.BytesIO(move_bytes))
+        except Exception as e:
+            st.error(f"이동 이력 파일(업로드)을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame(columns=default_cols)
+    elif os.path.exists(MOVE_LOG_CSV):
+        try:
+            df = pd.read_csv(MOVE_LOG_CSV)
+        except Exception as e:
+            st.error(f"이동 이력 파일을 읽는 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame(columns=default_cols)
+    else:
         return pd.DataFrame(columns=default_cols)
 
     # 예전 로그에 ID열이 없을 수도 있으니 보정
@@ -423,6 +519,12 @@ def load_move_log() -> pd.DataFrame:
                 df[c] = pd.NA
 
     return df[default_cols]
+
+
+def load_move_log() -> pd.DataFrame:
+    ss = st.session_state
+    move_bytes = ss.get("move_log_csv_bytes", None)
+    return _load_move_log_core(move_bytes)
 
 
 def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zone: str, to_zone: str):
@@ -458,100 +560,112 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 
     new_df = pd.DataFrame(rows)
 
-    if os.path.exists(MOVE_LOG_CSV):
+    # 기존 로그 불러오기 (세션/로컬)
+    if "move_log_csv_bytes" in ss:
+        try:
+            old_df = pd.read_csv(io.BytesIO(ss["move_log_csv_bytes"]))
+        except Exception:
+            old_df = pd.DataFrame()
+    elif os.path.exists(MOVE_LOG_CSV):
         try:
             old_df = pd.read_csv(MOVE_LOG_CSV)
         except Exception:
             old_df = pd.DataFrame()
-        log_df = pd.concat([old_df, new_df], ignore_index=True)
     else:
-        log_df = new_df
+        old_df = pd.DataFrame()
 
-    # 캐시 무효화 후 저장
-    load_move_log.clear()
-    log_df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+    log_df = pd.concat([old_df, new_df], ignore_index=True)
 
+    # 1) 세션에 다시 저장
+    buf = io.BytesIO()
+    log_df.to_csv(buf, index=False, encoding="utf-8-sig")
+    ss["move_log_csv_bytes"] = buf.getvalue()
 
-# ==============================
-# stock.xlsx 관련 유틸
-# ==============================
-@st.cache_data(show_spinner=False)
-def load_stock() -> pd.DataFrame:
-    if not os.path.exists(STOCK_FILE):
-        return pd.DataFrame()
+    _load_move_log_core.clear()
 
+    # 2) 로컬 CSV에도 저장 (로컬 실행용)
     try:
-        df = pd.read_excel(STOCK_FILE)
-    except Exception as e:
-        st.error(f"stock.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
-        return pd.DataFrame()
-
-    return df
+        log_df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
 
 
-def map_warehouse_category(code: str) -> str:
-    if not isinstance(code, str):
-        return "외주"
+# ==============================
+# 데이터 파일 업로드 화면 (최초 1회용)
+# ==============================
+def render_file_loader():
+    ss = st.session_state
 
-    c = code.strip().upper()
+    st.title("📁 데이터 파일 업로드")
+    st.markdown(
+        """
+        Streamlit Cloud 또는 초기 설정 시, GitHub에 올리기 어려운 CSV/엑셀 파일들을
+        여기에서 직접 업로드해서 사용합니다.
 
-    if c in {"WC301", "WC501", "WC502", "WC503", "WC504"}:
-        return "자사"
-
-    if c in {"WH001", "WH102", "WH201", "WH701", "WH301", "WH601", "WH401", "WH506"}:
-        return "창고"
-
-    if c in {"WH202", "WH302"}:
-        return "불량"
-
-    return "외주"
-
-
-def get_stock_summary(item_code: str, lot: str):
-    df = load_stock()
-    if df.empty:
-        return None, None
-
-    required_cols = ["창고/작업장", "창고/작업장명", "품번", "로트번호", "실재고수량"]
-    for c in required_cols:
-        if c not in df.columns:
-            return None, None
-
-    sub = df[
-        (df["품번"].astype(str) == str(item_code))
-        & (df["로트번호"].astype(str) == str(lot))
-    ].copy()
-
-    if sub.empty:
-        return None, None
-
-    sub["실재고수량"] = pd.to_numeric(sub["실재고수량"], errors="coerce").fillna(0.0)
-    sub = sub[sub["실재고수량"] > 0]
-    if sub.empty:
-        return None, None
-
-    sub["대분류"] = sub["창고/작업장"].apply(map_warehouse_category)
-
-    grp = (
-        sub.groupby(["대분류", "창고/작업장", "창고/작업장명"], as_index=False)["실재고수량"]
-        .sum()
-    )
-    grp = grp.sort_values("실재고수량", ascending=False)
-
-    grp = grp.rename(
-        columns={
-            "창고/작업장": "창고코드",
-            "창고/작업장명": "창고명",
-            "실재고수량": "총용량_kg",
-        }
+        아래 4개 파일은 **필수**이고, 이동 이력(`bulk_move_log.csv`)은 **있으면 업로드, 없으면 생략**해도 됩니다.
+        """
     )
 
-    parts = []
-    for _, r in grp.iterrows():
-        parts.append(f"{r['대분류']}({r['창고명']} {r['창고코드']}): {int(r['총용량_kg'])}kg")
-    summary_text = ", ".join(parts)
+    col_left, col_right = st.columns(2)
 
-    return grp, summary_text
+    with col_left:
+        bulk_file = st.file_uploader(
+            "1) bulk_drums_extended.csv (필수)",
+            type=["csv"],
+            key="first_up_bulk",
+        )
+        prod_file = st.file_uploader(
+            "2) production.xlsx (필수)",
+            type=["xlsx"],
+            key="first_up_prod",
+        )
+        recv_file = st.file_uploader(
+            "3) receive.xlsx (필수)",
+            type=["xlsx"],
+            key="first_up_recv",
+        )
+        stock_file = st.file_uploader(
+            "4) stock.xlsx (필수)",
+            type=["xlsx"],
+            key="first_up_stock",
+        )
+
+    with col_right:
+        move_file = st.file_uploader(
+            "5) bulk_move_log.csv (선택)",
+            type=["csv"],
+            key="first_up_move",
+        )
+        st.caption("※ 없으면 업로드 안 해도 됩니다. 새 로그로 시작해요.")
+
+    if st.button("업로드 완료", key="first_upload_done"):
+        missing = []
+        if bulk_file is None:
+            missing.append("bulk_drums_extended.csv")
+        if prod_file is None:
+            missing.append("production.xlsx")
+        if recv_file is None:
+            missing.append("receive.xlsx")
+        if stock_file is None:
+            missing.append("stock.xlsx")
+
+        if missing:
+            st.error("다음 필수 파일을 모두 업로드해 주세요: " + ", ".join(missing))
+            return
+
+        # 바이트로 세션에 저장
+        ss["bulk_csv_bytes"] = bulk_file.read()
+        ss["prod_xlsx_bytes"] = prod_file.read()
+        ss["recv_xlsx_bytes"] = recv_file.read()
+        ss["stock_xlsx_bytes"] = stock_file.read()
+
+        if move_file is not None:
+            ss["move_log_csv_bytes"] = move_file.read()
+
+        ss["data_initialized"] = True
+
+        st.success("파일 업로드가 완료되었습니다. 메인 화면으로 이동합니다.")
+        st.rerun()
 
 
 # ==============================
@@ -625,7 +739,7 @@ def render_tab_move():
         )
 
         # 버튼 두 개가 들어갈 영역을 넓게 확보
-        btn_col1, btn_sp, btn_col2 = st.columns([1, 0.2, 1])
+        btn_col1, btn_sp, btn_col2 = st.columns([1, 0.05, 1])
         with btn_col1:
             search_clicked = st.button("조회하기", key="mv_search_btn_csv")
         with btn_col2:
@@ -904,7 +1018,7 @@ def render_tab_move():
         with loc_col1:
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
         with loc_col2:
-            b1_col, b_sp, b2_col = st.columns([1, 0.2, 1])
+            b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
             with b1_col:
                 if stock_summary_df is not None and not stock_summary_df.empty:
                     if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
@@ -922,9 +1036,8 @@ def render_tab_move():
         drum_new_qty = {}
 
         drum_list = lot_df["통번호"].tolist()
-
-        # 모두 선택 / 모두 해제  → 버튼 칼럼 폭을 넉넉하게 확보
-        c1, c_sp, c2 = st.columns([1, 0.2, 1])
+        # 모두 선택 / 모두 해제
+        c1, c_sp, c2, _c_gap = st.columns([1, 0.05, 1, 6])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}"):
                 for dn in drum_list:
@@ -933,7 +1046,6 @@ def render_tab_move():
             if st.button("모두 해제", key=f"mv_select_none_{lot}"):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = False
-
 
         for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
@@ -1104,17 +1216,12 @@ def render_tab_lookup():
         .sort_values("현재위치")
     )
 
-    # 요약 테이블 높이를 행 개수에 자동 맞춤
+    # 행 개수에 맞춰 높이 자동 조정
     row_height = 35
     header_height = 40
     dynamic_height = header_height + row_height * (len(summary) + 1)
 
-    st.dataframe(
-        summary,
-        width=340,
-        height=dynamic_height,
-    )
-
+    st.dataframe(summary, width=600, height=dynamic_height)
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
@@ -1343,7 +1450,7 @@ def render_tab_move_log():
 
     cols_order = [
         "시간",
-        "ID",       # 작성자
+        "ID",
         "품번",
         "품명",
         "로트번호",
@@ -1360,17 +1467,168 @@ def render_tab_move_log():
 
 
 # ==============================
+# 탭 5: 데이터 파일 관리
+# ==============================
+def file_status(sess_key: str, path: str) -> str:
+    ss = st.session_state
+    if sess_key in ss:
+        return "세션에 업로드된 파일 사용 중"
+    if os.path.exists(path):
+        return f"로컬 파일 사용 중 ({path})"
+    return "파일 없음"
+
+
+def render_tab_data():
+    ss = st.session_state
+    st.markdown("### 📁 데이터 파일 관리")
+    st.write(
+        "필요할 때마다 아래에서 CSV/엑셀 파일을 다시 업로드해서 교체할 수 있습니다. "
+        "업로드하면 **현재 세션에서 바로 반영**됩니다."
+    )
+
+    # --- bulk_drums_extended.csv ---
+    with st.expander("1) bulk_drums_extended.csv (메인 벌크 CSV)", expanded=True):
+        st.write("현재 상태:", file_status("bulk_csv_bytes", CSV_PATH))
+        bulk_file = st.file_uploader(
+            "새 bulk_drums_extended.csv 업로드 (csv)",
+            type=["csv"],
+            key="data_up_bulk",
+        )
+        if st.button("이 파일로 bulk CSV 교체", key="apply_bulk"):
+            if bulk_file is None:
+                st.warning("먼저 파일을 선택해 주세요.")
+            else:
+                data = bulk_file.read()
+                ss["bulk_csv_bytes"] = data
+                _load_drums_core.clear()
+                # 로컬에도 저장 (가능한 경우)
+                try:
+                    df_tmp = _load_drums_core(data)
+                    df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
+                except Exception:
+                    pass
+                st.success("bulk_drums_extended.csv가 교체되었습니다.")
+
+    # --- production.xlsx ---
+    with st.expander("2) production.xlsx (자사 작업번호)", expanded=False):
+        st.write("현재 상태:", file_status("prod_xlsx_bytes", PRODUCTION_FILE))
+        prod_file = st.file_uploader(
+            "새 production.xlsx 업로드",
+            type=["xlsx"],
+            key="data_up_prod",
+        )
+        if st.button("이 파일로 production 교체", key="apply_prod"):
+            if prod_file is None:
+                st.warning("먼저 파일을 선택해 주세요.")
+            else:
+                data = prod_file.read()
+                ss["prod_xlsx_bytes"] = data
+                _load_production_core.clear()
+                try:
+                    df_tmp = _load_production_core(data)
+                    df_tmp.to_excel(PRODUCTION_FILE, index=False)
+                except Exception:
+                    pass
+                st.success("production.xlsx가 교체되었습니다.")
+
+    # --- receive.xlsx ---
+    with st.expander("3) receive.xlsx (사급 입하번호)", expanded=False):
+        st.write("현재 상태:", file_status("recv_xlsx_bytes", RECEIVE_FILE))
+        recv_file = st.file_uploader(
+            "새 receive.xlsx 업로드",
+            type=["xlsx"],
+            key="data_up_recv",
+        )
+        if st.button("이 파일로 receive 교체", key="apply_recv"):
+            if recv_file is None:
+                st.warning("먼저 파일을 선택해 주세요.")
+            else:
+                data = recv_file.read()
+                ss["recv_xlsx_bytes"] = data
+                _load_receive_core.clear()
+                try:
+                    df_tmp = _load_receive_core(data)
+                    df_tmp.to_excel(RECEIVE_FILE, index=False)
+                except Exception:
+                    pass
+                st.success("receive.xlsx가 교체되었습니다.")
+
+    # --- stock.xlsx ---
+    with st.expander("4) stock.xlsx (전산 재고)", expanded=False):
+        st.write("현재 상태:", file_status("stock_xlsx_bytes", STOCK_FILE))
+        stock_file = st.file_uploader(
+            "새 stock.xlsx 업로드",
+            type=["xlsx"],
+            key="data_up_stock",
+        )
+        if st.button("이 파일로 stock 교체", key="apply_stock"):
+            if stock_file is None:
+                st.warning("먼저 파일을 선택해 주세요.")
+            else:
+                data = stock_file.read()
+                ss["stock_xlsx_bytes"] = data
+                _load_stock_core.clear()
+                try:
+                    df_tmp = _load_stock_core(data)
+                    df_tmp.to_excel(STOCK_FILE, index=False)
+                except Exception:
+                    pass
+                st.success("stock.xlsx가 교체되었습니다.")
+
+    # --- bulk_move_log.csv ---
+    with st.expander("5) bulk_move_log.csv (이동 이력, 선택)", expanded=False):
+        st.write("현재 상태:", file_status("move_log_csv_bytes", MOVE_LOG_CSV))
+        move_file = st.file_uploader(
+            "새 bulk_move_log.csv 업로드 (csv)",
+            type=["csv"],
+            key="data_up_move",
+        )
+        if st.button("이 파일로 이동 이력 교체", key="apply_move"):
+            if move_file is None:
+                st.warning("먼저 파일을 선택해 주세요.")
+            else:
+                data = move_file.read()
+                ss["move_log_csv_bytes"] = data
+                _load_move_log_core.clear()
+                try:
+                    df_tmp = _load_move_log_core(data)
+                    df_tmp.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+                except Exception:
+                    pass
+                st.success("bulk_move_log.csv가 교체되었습니다.")
+
+    st.markdown("---")
+    st.caption(
+        "※ Cloud에서는 세션이 초기화되면 다시 업로드해야 합니다. "
+        "중요한 변경 내용은 사이드바의 다운로드 버튼으로 CSV를 저장해 두세요."
+    )
+
+
+# ==============================
 # 메인
 # ==============================
 def main():
     ss = st.session_state
 
-    # 로그인 안 되어 있으면 로그인 화면만 표시
+    # 1) 로그인 안 되어 있으면 로그인 화면만 표시
     if "user_id" not in ss or "user_name" not in ss:
         render_login()
         return
 
-    # 사이드바: 사용자 정보 + 로그아웃
+    # 2) 필수 데이터 파일 준비 여부 확인
+    files_ready = (
+        ("bulk_csv_bytes" in ss or os.path.exists(CSV_PATH))
+        and ("prod_xlsx_bytes" in ss or os.path.exists(PRODUCTION_FILE))
+        and ("recv_xlsx_bytes" in ss or os.path.exists(RECEIVE_FILE))
+        and ("stock_xlsx_bytes" in ss or os.path.exists(STOCK_FILE))
+    )
+
+    # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
+    if not ss.get("data_initialized", False) and not files_ready:
+        render_file_loader()
+        return
+
+    # 3) 사이드바: 사용자 정보 + 로그아웃 + (선택) CSV 다운로드 버튼
     with st.sidebar:
         st.markdown(f"**사용자:** {ss['user_name']} ({ss['user_id']})")
         if st.button("로그아웃", key="logout_btn"):
@@ -1379,10 +1637,26 @@ def main():
                     del st.session_state[k]
             st.rerun()
 
+        # 현재 세션의 bulk/move_log를 다운로드할 수 있게
+        if "bulk_csv_bytes" in ss:
+            st.download_button(
+                "현재 bulk CSV 다운로드",
+                data=ss["bulk_csv_bytes"],
+                file_name="bulk_drums_extended_current.csv",
+                mime="text/csv",
+            )
+        if "move_log_csv_bytes" in ss:
+            st.download_button(
+                "이동 이력 CSV 다운로드",
+                data=ss["move_log_csv_bytes"],
+                file_name="bulk_move_log_current.csv",
+                mime="text/csv",
+            )
+
     st.title("🏭 벌크 관리 시스템")
 
-    tab_move, tab_lookup, tab_map, tab_log = st.tabs(
-        ["📦 이동(CSV)", "🔍 조회(CSV)", "🗺 지도(CSV)", "📜 이동 이력"]
+    tab_move, tab_lookup, tab_map, tab_log, tab_data = st.tabs(
+        ["📦 이동(CSV)", "🔍 조회(CSV)", "🗺 지도(CSV)", "📜 이동 이력", "📁 데이터"]
     )
 
     with tab_move:
@@ -1393,6 +1667,8 @@ def main():
         render_tab_map()
     with tab_log:
         render_tab_move_log()
+    with tab_data:
+        render_tab_data()
 
 
 if __name__ == "__main__":
