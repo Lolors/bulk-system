@@ -757,7 +757,7 @@ def clear_move_inputs():
 
 
 def render_tab_move():
-    st.markdown("### 📦 벌크 이동 (CSV 직접 수정)")
+    st.markdown("### 📦 벌크 이동")
 
     ss = st.session_state
     ss.setdefault("mv_scanned_barcode", "")
@@ -1133,7 +1133,7 @@ def render_tab_move():
         col1, col2 = st.columns(2)
         with col1:
             from_zone = st.text_input(
-                "현재 위치(CSV 기준)",
+                "현재 위치",
                 value=current_zone if current_zone != "혼합" else "",
                 help="예: 4층-A1, 외주 등",
                 key="mv_from_zone_csv",
@@ -1231,7 +1231,7 @@ def render_tab_move():
 # 탭 2: 조회
 # ==============================
 def render_tab_lookup():
-    st.markdown("### 🔍 벌크 조회 (CSV 기준)")
+    st.markdown("### 🔍 벌크 조회")
 
     df = load_drums()
     if df.empty:
@@ -1254,7 +1254,7 @@ def render_tab_lookup():
         st.warning("검색 결과가 없습니다.")
         return
 
-    st.markdown("#### 📄 행별 상세 (bulk_drums_extended와 동일 구조)")
+    st.markdown("#### 📄 행별 상세")
     st.dataframe(df_view, use_container_width=True)
 
     st.markdown("---")
@@ -1710,7 +1710,7 @@ def main():
     st.title("🏭 벌크 관리 시스템")
 
     tab_move, tab_lookup, tab_map, tab_log, tab_data = st.tabs(
-        ["📦 이동(CSV)", "🔍 조회(CSV)", "🗺 지도(CSV)", "📜 이동 이력", "📁 데이터"]
+        ["📦 이동", "🔍 조회", "🗺 지도", "📜 이동 이력", "📁 데이터"]
     )
 
     with tab_move:
