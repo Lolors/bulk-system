@@ -8,6 +8,7 @@ import tempfile
 from google.cloud import vision
 from google.oauth2 import service_account
 import re
+import hashlib
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -771,7 +772,9 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 # ==============================
 from datetime import datetime
 
+@st.cache_data(show_spinner=False, ttl=60)
 def last_upload_caption(filename: str) -> str:
+
     """
     1) S3 객체가 있으면 그 객체의 LastModified 시간을 표시
     2) 없으면 로컬 파일 수정시간을 표시
@@ -985,6 +988,7 @@ def clear_move_inputs():
     ss["mv_barcode"] = ""
     ss["mv_lot"] = ""
     ss["mv_scanned_barcode"] = ""
+    ss.pop("mv_last_scan_hash", None)   # 🔹 이미지 해시도 초기화
 
 
 def render_tab_move():
@@ -1047,36 +1051,49 @@ def render_tab_move():
             image_bytes = scan_file.read()
             image_name = scan_file.name
 
-        # ================== DBR 디코딩 ==================
+        # ================== DBR + Vision 디코딩 (이미지당 1번만) ==================
         if image_bytes is not None:
-            try:
-                img_raw = Image.open(io.BytesIO(image_bytes))
+            # 현재 이미지의 해시 계산
+            img_hash = hashlib.md5(image_bytes).hexdigest()
+            prev_hash = ss.get("mv_last_scan_hash")
 
-                img_display = img_raw.copy()
-                st.image(img_display, caption=image_name, width=220)
+            # 새로운 이미지일 때만 인식 수행
+            if img_hash != prev_hash:
+                ss["mv_last_scan_hash"] = img_hash
 
-                codes = dbr_decode(img_raw)
+                try:
+                    img_raw = Image.open(io.BytesIO(image_bytes))
 
-                text_code = ""
+                    img_display = img_raw.copy()
+                    st.image(img_display, caption=image_name, width=220)
 
-                if codes:
-                    _, text_code = codes[0]
-                    text_code = text_code.strip()
+                    # 1차: DBR
+                    codes = dbr_decode(img_raw)
+                    text_code = ""
 
-                # DBR이 못 읽었으면 → Google Vision OCR로 바코드 아래 문자열 시도
-                if not text_code:
-                    full_text = gcv_ocr_full_text(img_raw)
-                    ocr_code = extract_barcode_like_code(full_text)
-                    text_code = ocr_code.strip()
+                    if codes:
+                        _, text_code = codes[0]
+                        text_code = text_code.strip()
 
-                if text_code:
-                    st.session_state["mv_scanned_barcode"] = text_code
-                    st.success(f"인식됨: {text_code}")
-                else:
-                    st.warning("바코드를 인식하지 못했습니다.")
+                    # 2차: DBR 실패하면 Vision OCR
+                    if not text_code:
+                        full_text = gcv_ocr_full_text(img_raw)
+                        ocr_code = extract_barcode_like_code(full_text)
+                        text_code = ocr_code.strip()
 
-            except Exception as e:
-                st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+                    if text_code:
+                        ss["mv_scanned_barcode"] = text_code
+                        st.success(f"인식됨: {text_code}")
+                    else:
+                        st.warning("바코드를 인식하지 못했습니다.")
+
+                except Exception as e:
+                    st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+
+            else:
+                # 같은 이미지는 이미 인식 끝난 상태
+                if ss.get("mv_scanned_barcode"):
+                    st.info(f"이미 인식된 바코드: {ss['mv_scanned_barcode']}")
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
     st.write("")
