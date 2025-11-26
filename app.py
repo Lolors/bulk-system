@@ -4,6 +4,7 @@ import os
 from datetime import datetime, date
 import io
 import math
+import tempfile
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -174,66 +175,49 @@ def preprocess_for_barcode(pil_img):
 
     return img
 
-
 def dbr_decode(pil_img):
     """
-    Dynamsoft DBR(CaptureVisionRouter)로만 바코드 디코딩.
-    여러 가지 버전(원본, 흑백, 크롭)을 시도해서
-    성공하면 [(포맷, 텍스트), ...] 리스트를 반환.
+    Dynamsoft DBR(CaptureVisionRouter)로 바코드 디코딩.
+    - PIL 이미지를 임시 파일로 저장
+    - 파일 경로를 capture()에 넘겨서 공식 샘플 방식 그대로 사용
+    - 성공하면 [(포맷, 텍스트), ...] 리스트를 반환
     """
     cvr = get_dbr_router()
     if cvr is None or EnumPresetTemplate is None or EnumErrorCode is None:
         return []
 
-    base = preprocess_for_barcode(pil_img)
+    # 전처리: 크기만 최소 800px 맞춰줌 (너무 작으면 확대)
+    img = pil_img.copy()
+    if Image is not None:
+        min_side = min(img.size)
+        if min_side < 800:
+            scale = 800.0 / float(min_side)
+            new_size = (int(img.width * scale), int(img.height * scale))
+            img = img.resize(new_size, Image.LANCZOS)
 
-    if Image is None:
-        candidate_images = [base]
-    else:
-        # 1) 원본 컬러
-        candidate_images = [base]
+    # 1) 임시 파일에 저장 (PNG)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+            img.save(tmp_path, format="PNG")
 
-        # 2) 흑백 + autocontrast + 샤픈
-        gray = base.convert("L")
-        gray = ImageOps.autocontrast(gray)
-        gray = ImageEnhance.Sharpness(gray).enhance(2.0)
-        candidate_images.append(gray)
+        # 2) 공식 샘플 방식: 파일 경로 + EnumPresetTemplate.value 사용
+        result = cvr.capture(tmp_path, EnumPresetTemplate.PT_READ_BARCODES.value)
 
-        # 3) 중앙 띠만 자른 크롭 (바코드가 가운데쯤에 있다고 가정)
-        w, h = base.size
-        band_top = int(h * 0.35)
-        band_bottom = int(h * 0.75)
-        if band_bottom > band_top:
-            center_band = base.crop((0, band_top, w, band_bottom))
-            candidate_images.append(center_band)
-
-            # 중앙 띠의 흑백 버전
-            cb_gray = center_band.convert("L")
-            cb_gray = ImageOps.autocontrast(cb_gray)
-            cb_gray = ImageEnhance.Sharpness(cb_gray).enhance(2.0)
-            candidate_images.append(cb_gray)
-
-    # 후보 이미지들에 대해 순차적으로 시도
-    for idx, img in enumerate(candidate_images):
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        data = buf.getvalue()
-
-        try:
-            result = cvr.capture(data, EnumPresetTemplate.PT_READ_BARCODES)
-        except Exception:
-            continue
-
-        err = result.get_error_code()
-        if err not in (
+        # 3) 에러 코드 체크
+        err_code = result.get_error_code()
+        if err_code not in (
             EnumErrorCode.EC_OK,
             getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
         ):
-            continue
+            # 디버깅용 (원하면 잠깐 켜두기)
+            # st.write("DBR error:", err_code, result.get_error_string())
+            return []
 
         barcode_result = result.get_decoded_barcodes_result()
         if barcode_result is None or barcode_result.get_items() == 0:
-            continue
+            return []
 
         items = barcode_result.get_items()
         codes = []
@@ -246,12 +230,23 @@ def dbr_decode(pil_img):
             if text:
                 codes.append((fmt, text))
 
-        if codes:
-            # 디버깅용 로그 (원하면 잠깐 켜두기)
-            # print(f"DBR decoded (candidate {idx}):", codes)
-            return codes
+        # 디버깅용 출력
+        # print("DBR decoded:", codes)
 
-    return []
+        return codes
+
+    except Exception as e:
+        # st.write("DBR exception:", e)
+        return []
+
+    finally:
+        # 4) 임시 파일 삭제
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
 
 
 # ==============================
