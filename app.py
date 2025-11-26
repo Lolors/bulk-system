@@ -1195,7 +1195,7 @@ def render_tab_move():
 
         drum_list = lot_df["통번호"].tolist()
         # 모두 선택 / 모두 해제  - 버튼 폭을 조금만 사용하는 좁은 컬럼
-        c1, c_sp, c2, _c_gap = st.columns([0.5, 0.05, 0.5, 7])
+        c1, c_sp, c2, _c_gap = st.columns([1, 1, 1.5, 7])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
                 for dn in drum_list:
