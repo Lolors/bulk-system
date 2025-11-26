@@ -907,25 +907,32 @@ def render_tab_move():
     # 상단 레이아웃: 4칼럼 (1: 입력칸, 2: 바코드 스캔, 3/4: 여유공간)
     col1, col2, col3, col4 = st.columns([2.5, 1.2, 0.8, 0.5])
 
-    # 1번 칼럼: 작업번호/입하번호 + 로트번호 + 조회/초기화 버튼
+    # 1번 칼럼: 작업번호/입하번호 + 로트번호(같은 줄) + 조회/초기화 버튼
     with col1:
-        barcode = st.text_input(
-            barcode_label,
-            key="mv_barcode",
-            placeholder="예: W24012345",
-        )
-        lot_input = st.text_input(
-            "로트번호를 입력해 주세요.",
-            key="mv_lot",
-            placeholder="예: 2E075K",
-        )
+        # ▶ 입력칸 2개를 한 줄에 나란히
+        in_col1, in_col2 = st.columns([1.3, 1])
+        with in_col1:
+            barcode = st.text_input(
+                barcode_label,
+                key="mv_barcode",
+                placeholder="예: W24012345",
+            )
+        with in_col2:
+            lot_input = st.text_input(
+                "로트번호를 입력해 주세요.",
+                key="mv_lot",
+                placeholder="예: 2E075K",
+            )
 
-        # 버튼 두 개가 들어갈 영역을 넓게 확보
+        st.write("")  # 살짝 여백
+
+        # 버튼 두 개 (조회 / 초기화)
         btn_col1, btn_sp, btn_col2 = st.columns([1, 0.05, 1])
         with btn_col1:
             search_clicked = st.button("조회하기", key="mv_search_btn_csv")
         with btn_col2:
             st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+
 
     # 2번 칼럼: 바코드 스캔 영역
     with col2:
