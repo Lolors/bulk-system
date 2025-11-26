@@ -957,76 +957,51 @@ def render_tab_move():
             placeholder="예: 2E075K",
         )
 
-    # ================== 2줄: 바코드 스캔 업로드 (절반 너비) ==================
-    st.write("")
+# ================== 바코드 스캔 업로드 (카메라 입력 없음) ==================
+st.write("")
 
-    # 카메라 켜기 상태값
-    if "mv_camera_on" not in st.session_state:
-        st.session_state["mv_camera_on"] = False
+scan_col, _ = st.columns([1.2, 3])
 
-    scan_col, _ = st.columns([1.2, 3])
+with scan_col:
+    st.caption("📷 라벨 사진 업로드 (모바일은 '카메라 촬영' 선택 가능)")
 
-    with scan_col:
-        st.caption("📷 모바일은 카메라 촬영, PC는 이미지 업로드를 사용하세요.")
+    # 파일 업로드 (모바일에서는 '카메라 촬영' 옵션이 자동으로 등장)
+    scan_file = st.file_uploader(
+        "바코드 이미지 업로드",
+        type=["png", "jpg", "jpeg"],
+        key="mv_barcode_image",
+    )
 
-        # 🔘 1) 카메라 켜기 / 끄기 버튼
-        if not st.session_state["mv_camera_on"]:
-            if st.button("카메라 켜기"):
-                st.session_state["mv_camera_on"] = True
-                st.rerun()
-        else:
-            if st.button("카메라 끄기"):
-                st.session_state["mv_camera_on"] = False
-                st.rerun()
+    image_bytes = None
+    image_name = None
 
-        # 🔍 2) 카메라가 켜진 상태에서만 camera_input 표시
-        cam_image = None
-        if st.session_state["mv_camera_on"]:
-            cam_image = st.camera_input(
-                "📷 라벨 촬영",
-                key="mv_barcode_camera"
-            )
+    # 업로드 이미지가 있을 경우
+    if scan_file is not None:
+        image_bytes = scan_file.read()
+        image_name = scan_file.name
 
-        # 🖼 3) 기존 이미지 업로드 (PC 및 선택용)
-        scan_file = st.file_uploader(
-            "이미지 파일 업로드",
-            type=["png", "jpg", "jpeg"],
-            key="mv_barcode_image",
-        )
+    # ================== DBR 디코딩 ==================
+    if image_bytes is not None:
+        try:
+            # DBR 원본
+            img_raw = Image.open(io.BytesIO(image_bytes))
 
-        # 📌 우선순위 = 카메라 → 파일 업로드
-        image_bytes = None
-        image_name = None
+            # 화면 표시용
+            img_display = img_raw.copy()
+            st.image(img_display, caption=image_name, width=220)
 
-        if cam_image is not None:
-            image_bytes = cam_image.getvalue()
-            image_name = "camera_capture.png"
-        elif scan_file is not None:
-            image_bytes = scan_file.read()
-            image_name = scan_file.name
+            # DBR 원본으로만 인식
+            codes = dbr_decode(img_raw)
 
-        # 📦 DBR 디코딩
-        if image_bytes is not None:
-            try:
-                # DBR 원본 전용
-                img_raw = Image.open(io.BytesIO(image_bytes))
-        
-                # Streamlit 표시용 (리사이즈 OK)
-                img_display = img_raw.copy()
-                st.image(img_display, caption=image_name, width=220)
+            if codes:
+                _, text_code = codes[0]
+                st.session_state["mv_scanned_barcode"] = text_code.strip()
+                st.success(f"인식됨: {text_code}")
+            else:
+                st.warning("바코드를 인식하지 못했습니다.")
 
-                # DBR은 반드시 원본 이미지를 사용해야 함
-                codes = dbr_decode(img_raw)
-
-                if codes:
-                    _, text_code = codes[0]
-                    st.session_state["mv_scanned_barcode"] = text_code.strip()
-                    st.success(f"인식됨: {text_code}")
-                else:
-                    st.warning("바코드를 인식하지 못했습니다.")
-
-            except Exception as e:
-                st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+        except Exception as e:
+            st.error(f"이미지를 처리하는 중 오류 발생: {e}")
 
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
