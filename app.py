@@ -1544,11 +1544,13 @@ def render_tab_lookup():
     else:
         df_view = df
 
-        # 🔍 용량 0 제외 체크박스 추가
-    exclude_zero = st.checkbox("용량 0 제외", value=False)
+    # 🔍 용량 0 포함 여부 (기본: 미포함)
+    include_zero = st.checkbox("용량 0 포함", value=False)
 
-    if exclude_zero:
+    # 기본(default) 상태는 0 제외
+    if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
+
 
 
     if df_view.empty:
