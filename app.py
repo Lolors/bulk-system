@@ -1002,22 +1002,51 @@ def render_tab_move():
                 st.error(f"이미지를 처리하는 중 오류 발생: {e}")
 
 
-# ================== 고해상도 WebRTC 카메라 방식 ==================
+    # ================== 고해상도 WebRTC 카메라 방식 ==================
     st.write("")  # 블록 간 여백
     st.subheader("📷 고해상도 카메라 촬영 (WebRTC)")
 
-    img_raw = webcam_component(key="highres_cam")
+    class BarcodeCapture(VideoTransformerBase):
+        def __init__(self):
+            self.last_frame = None
 
-    if img_raw is not None:
-        st.success("촬영 완료!")
-        st.image(img_raw, caption="촬영된 원본", width=300)
+        def transform(self, frame):
+            # 최신 프레임을 저장해 두고, 화면에는 그대로 보여줌
+            self.last_frame = frame
+            return frame
 
-        codes = dbr_decode(img_raw)
-        if codes:
-            st.success(f"인식됨: {codes[0][1]}")
-            st.session_state["mv_scanned_barcode"] = codes[0][1].strip()
-        else:
-            st.error("바코드를 인식하지 못했습니다.")
+    ctx = webrtc_streamer(
+        key="highres_cam",
+        video_transformer_factory=BarcodeCapture,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 1920},
+                "height": {"ideal": 1080},
+                "facingMode": "environment",  # 모바일에서 후면 카메라 우선
+            },
+            "audio": False,
+        },
+    )
+
+    # 촬영 버튼 & DBR 인식
+    if ctx.video_transformer:
+        if st.button("📸 이 화면으로 촬영", key="mv_capture_webrtc"):
+            frame = ctx.video_transformer.last_frame
+            if frame is not None:
+                img_raw = frame.to_image()  # PIL.Image 로 변환
+
+                st.image(img_raw, caption="촬영된 원본", width=300)
+
+                codes = dbr_decode(img_raw)
+                if codes:
+                    _, text_code = codes[0]
+                    text_code = text_code.strip()
+                    st.session_state["mv_scanned_barcode"] = text_code
+                    st.success(f"인식됨: {text_code}")
+                else:
+                    st.error("바코드를 인식하지 못했습니다.")
+            else:
+                st.warning("아직 카메라 영상이 준비되지 않았습니다. 잠시 후 다시 눌러 주세요.")
 
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
