@@ -1412,7 +1412,8 @@ def render_tab_lookup():
     st.markdown("---")
     st.markdown("#### 📊 현재위치별 용량 요약")
 
-    def show_summary_table(df_part: pd.DataFrame, title: str, width: int = 400):
+    # 요약 테이블 출력 함수
+    def show_summary_table(df_part: pd.DataFrame, title: str):
         st.markdown(f"##### {title}")
         if df_part.empty:
             st.info("데이터가 없습니다.")
@@ -1436,35 +1437,42 @@ def render_tab_lookup():
         })
         summary = pd.concat([summary, total_row], ignore_index=True)
 
+        # 표 높이 유동 조정
         row_height = 35
         header_height = 40
         dynamic_height = header_height + row_height * (len(summary) + 1)
 
-        st.dataframe(summary, width=width, height=dynamic_height)
+        st.dataframe(summary, use_container_width=True, height=dynamic_height)
 
-    # 층(또는 구역) 기준으로 분류용 컬럼
+    # 층 기준 분류
     tmp = df_view.copy()
     tmp["층"] = tmp["현재위치"].astype(str).str.split("-").str[0]
 
-    # 1) 자사 위치: 2층, 4층, 5층, 6층
-    df_onsite = tmp[tmp["층"].isin(["2층", "4층", "5층", "6층"])]
+    df_onsite = tmp[tmp["층"].isin(["2층", "4층", "5층", "6층"])]     # 1번
+    df_outsourcing = tmp[tmp["층"] == "외주"]                         # 2번
+    df_warehouse = tmp[tmp["층"] == "창고"]                           # 3번
+    df_consumed = tmp[tmp["층"].isin(["소진", "폐기"])]               # 4번
 
-    # 2) 외주
-    df_outsourcing = tmp[tmp["층"] == "외주"]
+    # ====== 1줄: 1번 + 2번 =====================
+    col1, col2 = st.columns(2)
 
-    # 3) 창고
-    df_warehouse = tmp[tmp["층"] == "창고"]
+    with col1:
+        show_summary_table(df_onsite, "1) 자사 위치 (2층 / 4층 / 5층 / 6층)")
 
-    # 4) 소진 + 폐기
-    df_consumed = tmp[tmp["층"].isin(["소진", "폐기"])]
+    with col2:
+        show_summary_table(df_outsourcing, "2) 외주")
 
-    # 표 4개 출력
-    show_summary_table(df_onsite, "1) 자사 위치 (2층 / 4층 / 5층 / 6층)")
-    show_summary_table(df_outsourcing, "2) 외주")
-    show_summary_table(df_warehouse, "3) 창고")
-    show_summary_table(df_consumed, "4) 소진 / 폐기")
+    # ====== 2줄: 3번 + 4번 =====================
+    col3, col4 = st.columns(2)
+
+    with col3:
+        show_summary_table(df_warehouse, "3) 창고")
+
+    with col4:
+        show_summary_table(df_consumed, "4) 소진 / 폐기")
 
     st.markdown("---")
+
     if st.button("현재 CSV를 그대로 백업 저장하기"):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"bulk_drums_extended_backup_{ts}.csv"
