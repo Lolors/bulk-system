@@ -67,20 +67,26 @@ except ImportError:
     EnumPresetTemplate = None
     EnumErrorCode = None
 
-# 라이선스 키
-# - Streamlit Cloud에서는 st.secrets["DBR_LICENSE"] 에 넣어 두고 사용
-# - 로컬에서는 fallback 값(또는 빈 문자열)을 사용
-DBR_LICENSE = ""
-try:
-    # Cloud / secrets.toml 에 값이 있으면 그걸 쓰고,
-    # 없으면 뒤의 기본 문자열(또는 빈 문자열)로 fallback
-    DBR_LICENSE = st.secrets.get(
-        "DBR_LICENSE",
-        "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng",
-    )
-except Exception:
-    # st.secrets 접근 자체가 실패해도 앱이 죽지 않도록
-    DBR_LICENSE = "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng"
+
+def load_dbr_license():
+    """
+    DBR 라이선스 키 로드:
+    1) st.secrets["DBR_LICENSE"]
+    2) 환경변수 DBR_LICENSE
+    """
+    lic = ""
+    try:
+        lic = st.secrets.get("DBR_LICENSE", "")
+    except Exception:
+        lic = ""
+    if not lic:
+        lic = os.getenv("DBR_LICENSE", "")
+    if not lic:
+        st.warning("DBR 라이선스 키를 찾을 수 없습니다. st.secrets 또는 환경변수 DBR_LICENSE에 등록해 주세요.")
+    return lic
+
+
+DBR_LICENSE = load_dbr_license()
 
 _DBR_CVR = None
 _DBR_LICENSE_INIT = False
@@ -601,6 +607,16 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 
 
 # ==============================
+# 업로드 시간 표시 유틸
+# ==============================
+def last_upload_caption(key: str) -> str:
+    ts = st.session_state.get(key)
+    if ts:
+        return f"마지막 업로드: {ts}"
+    return "마지막 업로드 이력 없음"
+
+
+# ==============================
 # 데이터 파일 업로드 화면 (최초 1회용)
 # ==============================
 def render_file_loader():
@@ -624,21 +640,28 @@ def render_file_loader():
             type=["csv"],
             key="first_up_bulk",
         )
+        st.caption(last_upload_caption("last_upload_bulk"))
+
         prod_file = st.file_uploader(
             "2) production.xlsx (필수)",
             type=["xlsx"],
             key="first_up_prod",
         )
+        st.caption(last_upload_caption("last_upload_prod"))
+
         recv_file = st.file_uploader(
             "3) receive.xlsx (필수)",
             type=["xlsx"],
             key="first_up_recv",
         )
+        st.caption(last_upload_caption("last_upload_recv"))
+
         stock_file = st.file_uploader(
             "4) stock.xlsx (필수)",
             type=["xlsx"],
             key="first_up_stock",
         )
+        st.caption(last_upload_caption("last_upload_stock"))
 
     with col_right:
         move_file = st.file_uploader(
@@ -646,6 +669,7 @@ def render_file_loader():
             type=["csv"],
             key="first_up_move",
         )
+        st.caption(last_upload_caption("last_upload_move"))
         st.caption("※ 없으면 업로드 안 해도 됩니다. 새 로그로 시작해요.")
 
     if st.button("업로드 완료", key="first_upload_done"):
@@ -676,6 +700,14 @@ def render_file_loader():
         ss["stock_xlsx_bytes"] = stock_bytes
         if move_bytes is not None:
             ss["move_log_csv_bytes"] = move_bytes
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ss["last_upload_bulk"] = now_str
+        ss["last_upload_prod"] = now_str
+        ss["last_upload_recv"] = now_str
+        ss["last_upload_stock"] = now_str
+        if move_bytes is not None:
+            ss["last_upload_move"] = now_str
 
         # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
         try:
@@ -721,7 +753,6 @@ def render_file_loader():
         st.rerun()
 
 
-
 # ==============================
 # 로그인 화면
 # ==============================
@@ -743,6 +774,18 @@ def render_login():
             st.rerun()
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
+
+
+# ==============================
+# (생략됐던) get_stock_summary 더미 정의
+# ==============================
+def get_stock_summary(item_code: str, lot: str):
+    """
+    원래 코드에 있던 get_stock_summary가 질문 코드에는 없어서
+    최소한의 더미로 넣어 둡니다.
+    실제 전산 재고 연동 로직이 있다면 이 부분을 교체해 주세요.
+    """
+    return None, ""
 
 
 # ==============================
@@ -926,7 +969,7 @@ def render_tab_move():
             hit = recv_df[recv_df["입하번호"].astype(str) == barcode_query]
             if hit.empty:
                 st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
+                ss["mv_seearched_csv"] = False
                 return
 
             r = hit.iloc[0]
@@ -1548,6 +1591,7 @@ def render_tab_data():
             type=["csv"],
             key="data_up_bulk",
         )
+        st.caption(last_upload_caption("last_upload_bulk"))
         if st.button("이 파일로 bulk CSV 교체", key="apply_bulk"):
             if bulk_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1561,6 +1605,7 @@ def render_tab_data():
                     df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
+                ss["last_upload_bulk"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
     # --- production.xlsx ---
@@ -1571,6 +1616,7 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_prod",
         )
+        st.caption(last_upload_caption("last_upload_prod"))
         if st.button("이 파일로 production 교체", key="apply_prod"):
             if prod_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1583,6 +1629,7 @@ def render_tab_data():
                     df_tmp.to_excel(PRODUCTION_FILE, index=False)
                 except Exception:
                     pass
+                ss["last_upload_prod"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("production.xlsx가 교체되었습니다.")
 
     # --- receive.xlsx ---
@@ -1593,6 +1640,7 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_recv",
         )
+        st.caption(last_upload_caption("last_upload_recv"))
         if st.button("이 파일로 receive 교체", key="apply_recv"):
             if recv_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1605,6 +1653,7 @@ def render_tab_data():
                     df_tmp.to_excel(RECEIVE_FILE, index=False)
                 except Exception:
                     pass
+                ss["last_upload_recv"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("receive.xlsx가 교체되었습니다.")
 
     # --- stock.xlsx ---
@@ -1615,6 +1664,7 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_stock",
         )
+        st.caption(last_upload_caption("last_upload_stock"))
         if st.button("이 파일로 stock 교체", key="apply_stock"):
             if stock_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1627,6 +1677,7 @@ def render_tab_data():
                     df_tmp.to_excel(STOCK_FILE, index=False)
                 except Exception:
                     pass
+                ss["last_upload_stock"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("stock.xlsx가 교체되었습니다.")
 
     # --- bulk_move_log.csv ---
@@ -1637,6 +1688,7 @@ def render_tab_data():
             type=["csv"],
             key="data_up_move",
         )
+        st.caption(last_upload_caption("last_upload_move"))
         if st.button("이 파일로 이동 이력 교체", key="apply_move"):
             if move_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1649,6 +1701,7 @@ def render_tab_data():
                     df_tmp.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
+                ss["last_upload_move"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("bulk_move_log.csv가 교체되었습니다.")
 
     st.markdown("---")
