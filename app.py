@@ -1532,13 +1532,13 @@ def render_tab_lookup():
     # ✅ 제조일자 기준 TAT(개월) 컬럼 추가
     df = add_tat_column(df)
     
-    query = st.text_input("로트번호, 품목코드 또는 현재위치를 입력해 주세요.")
+        query = st.text_input("로트번호, 품목코드 또는 품명을 입력해 주세요.")
     if query:
         q = query.strip()
         mask = (
             df["로트번호"].astype(str).str.contains(q, na=False)
             | df["품목코드"].astype(str).str.contains(q, na=False)
-            | df["현재위치"].astype(str).str.contains(q, na=False)
+            | df["품명"].astype(str).str.contains(q, na=False)
         )
         df_view = df[mask]
     else:
