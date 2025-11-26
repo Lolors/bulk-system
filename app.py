@@ -959,54 +959,65 @@ def render_tab_move():
         )
 
 # ================== 바코드 스캔 업로드 (카메라 입력 없음) ==================
-    st.write("")
+st.write("")
 
-    scan_col, _ = st.columns([1.2, 3])
+scan_col, _ = st.columns([1.2, 3])
 
-    with scan_col:
-        st.caption("📷 카메라로 바코드를 촬영해 주세요")
+with scan_col:
+    st.caption("📷 라벨 사진 업로드 (모바일은 '카메라 촬영' 선택 가능)")
 
-        img_raw = webcam_component(key="mv_webcam")
+    # 파일 업로드 (모바일에서는 '카메라 촬영' 옵션이 자동으로 등장)
+    scan_file = st.file_uploader(
+        "바코드 이미지 업로드",
+        type=["png", "jpg", "jpeg"],
+        key="mv_barcode_image",
+    )
 
-        if img_raw is not None:
-            st.image(img_raw, caption="촬영된 원본", width=300)
+    image_bytes = None
+    image_name = None
+
+    # 업로드 이미지가 있을 경우
+    if scan_file is not None:
+        image_bytes = scan_file.read()
+        image_name = scan_file.name
+
+    # ================== DBR 디코딩 (파일 업로드) ==================
+    if image_bytes is not None:
+        try:
+            img_raw = Image.open(io.BytesIO(image_bytes))
+
+            img_display = img_raw.copy()
+            st.image(img_display, caption=image_name, width=220)
 
             codes = dbr_decode(img_raw)
 
-        if codes:
-            _, text_code = codes[0]
-            st.session_state["mv_scanned_barcode"] = text_code.strip()
-            st.success(f"인식됨: {text_code}")
-        else:
-            st.warning("바코드를 인식하지 못했습니다.")
+            if codes:
+                _, text_code = codes[0]
+                st.session_state["mv_scanned_barcode"] = text_code.strip()
+                st.success(f"인식됨: {text_code}")
+            else:
+                st.warning("바코드를 인식하지 못했습니다.")
 
-        # 업로드 이미지가 있을 경우
-        if scan_file is not None:
-            image_bytes = scan_file.read()
-            image_name = scan_file.name
+        except Exception as e:
+            st.error(f"이미지를 처리하는 중 오류 발생: {e}")
 
-    # ================== DBR 디코딩 ==================
-        if image_bytes is not None:
-            try:
-                # DBR 원본
-                img_raw = Image.open(io.BytesIO(image_bytes))
 
-                # 화면 표시용
-                img_display = img_raw.copy()
-                st.image(img_display, caption=image_name, width=220)
+# ================== 고해상도 WebRTC 카메라 방식 ==================
+st.write("")  # 블록 간 여백
+st.subheader("📷 고해상도 카메라 촬영 (WebRTC)")
 
-                # DBR 원본으로만 인식
-                codes = dbr_decode(img_raw)
+img_raw = webcam_component(key="highres_cam")
 
-                if codes:
-                    _, text_code = codes[0]
-                    st.session_state["mv_scanned_barcode"] = text_code.strip()
-                    st.success(f"인식됨: {text_code}")
-                else:
-                    st.warning("바코드를 인식하지 못했습니다.")
+if img_raw is not None:
+    st.success("촬영 완료!")
+    st.image(img_raw, caption="촬영된 원본", width=300)
 
-            except Exception as e:
-                st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+    codes = dbr_decode(img_raw)
+    if codes:
+        st.success(f"인식됨: {codes[0][1]}")
+        st.session_state["mv_scanned_barcode"] = codes[0][1].strip()
+    else:
+        st.error("바코드를 인식하지 못했습니다.")
 
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
