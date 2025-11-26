@@ -70,6 +70,43 @@ def _s3_key(filename: str) -> str:
     prefix = S3_PREFIX.rstrip("/")
     return f"{prefix}/{filename}" if prefix else filename
 
+# ==============================
+# TAT 계산
+# ==============================
+def calc_tat_months(mfg_value):
+    """
+    제조일자(mfg_value)를 받아 오늘 기준 경과 개월 수(TAT)를 계산.
+    - 날짜가 없거나 파싱 안 되면 None
+    - 포맷: datetime, Timestamp, 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY.MM.DD', 'YYYYMMDD' 정도 지원
+    """
+    if pd.isna(mfg_value):
+        return None
+
+    d = None
+
+    # 이미 datetime / Timestamp 인 경우
+    if isinstance(mfg_value, (datetime, pd.Timestamp)):
+        d = mfg_value.date()
+    else:
+        s = str(mfg_value).strip()
+        if not s:
+            return None
+
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
+            try:
+                d = datetime.strptime(s, fmt).date()
+                break
+            except ValueError:
+                continue
+
+    if d is None:
+        return None
+
+    today = date.today()
+    months = (today.year - d.year) * 12 + (today.month - d.month)
+    if months < 0:
+        months = 0
+    return months
 
 # ==============================
 # 바코드 인식 (Dynamsoft DBR 전용 - CaptureVisionRouter 사용)
@@ -1343,6 +1380,16 @@ def render_tab_lookup():
     if df.empty:
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
+
+    # ✅ 제조일자 기준 TAT(개월) 계산 컬럼 추가
+    try:
+        if "제조일자" in df.columns:
+            df["TAT"] = df["제조일자"].apply(calc_tat_months)
+        else:
+            df["TAT"] = None
+    except Exception:
+        # 혹시라도 문제 생겨도 조회 자체는 돌게
+        df["TAT"] = None
 
     query = st.text_input("로트번호, 품목코드 또는 현재위치를 입력해 주세요.")
     if query:
