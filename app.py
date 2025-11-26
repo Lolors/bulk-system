@@ -5,7 +5,7 @@ from datetime import datetime, date
 import io
 import math
 import tempfile
-from webcam_component.webcam_component import webcam_component
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # ==============================
 # 사용자 계정 (로그인용)
