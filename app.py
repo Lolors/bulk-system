@@ -1424,7 +1424,7 @@ def render_tab_lookup():
     header_height = 40
     dynamic_height = header_height + row_height * (len(summary) + 1)
 
-    st.dataframe(summary, width=600, height=dynamic_height)
+    st.dataframe(summary, width=300, height=dynamic_height)
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
