@@ -68,9 +68,19 @@ except ImportError:
     EnumErrorCode = None
 
 # 라이선스 키
-DBR_LICENSE = (
-    "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng"
-)
+# - Streamlit Cloud에서는 st.secrets["DBR_LICENSE"] 에 넣어 두고 사용
+# - 로컬에서는 fallback 값(또는 빈 문자열)을 사용
+DBR_LICENSE = ""
+try:
+    # Cloud / secrets.toml 에 값이 있으면 그걸 쓰고,
+    # 없으면 뒤의 기본 문자열(또는 빈 문자열)로 fallback
+    DBR_LICENSE = st.secrets.get(
+        "DBR_LICENSE",
+        "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng",
+    )
+except Exception:
+    # st.secrets 접근 자체가 실패해도 앱이 죽지 않도록
+    DBR_LICENSE = "t0087YQEAAINfMObN9l7IB/gHyobwUtIY6VgVj1L2WHvCOWoxm2nesic7BIhqu4s8Fl7OWx1Bwwcz3av6LlDOCBEcHvtHMRO0H0z/aHI3jfdmdoo8YgUJR0ng"
 
 _DBR_CVR = None
 _DBR_LICENSE_INIT = False
