@@ -904,25 +904,29 @@ def render_tab_move():
     )
     barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-    # ================== 상단 레이아웃 ==================
-    # 1줄: [작업번호/입하번호] | [로트번호] | [바코드 스캔]
-    col_barc, col_lot, col_scan = st.columns([1.3, 1, 1.8])
+    # ================== 상단 입력 레이아웃 ==================
 
-    with col_barc:
+    # 1줄: 작업번호/입하번호 + 로트번호
+    row1_col1, row1_col2, row1_spacer = st.columns([1.1, 1.0, 2.5])
+
+    with row1_col1:
         barcode = st.text_input(
             barcode_label,
             key="mv_barcode",
             placeholder="예: W24012345",
         )
 
-    with col_lot:
+    with row1_col2:
         lot_input = st.text_input(
-            "로트번호를 입력해 주세요.",
+            "로트번호",
             key="mv_lot",
             placeholder="예: 2E075K",
         )
 
-    with col_scan:
+    # 2줄: 바코드 스캔 업로드(가로 전체)
+    st.write("")  # 약간의 여백
+    scan_col = st.container()
+    with scan_col:
         st.caption("라벨 사진을 업로드해 바코드를 인식할 수 있습니다.")
         scan_file = st.file_uploader(
             "바코드 라벨 사진 업로드 (선택)",
@@ -947,16 +951,17 @@ def render_tab_move():
                 except Exception as e:
                     st.error(f"이미지를 처리하는 중 오류가 발생했습니다: {e}")
 
-    st.write("")  # 위/아래 간단한 여백
+    st.write("")
 
-    # 2줄: [조회하기] [초기화] 버튼
-    btn_col1, btn_col2, _btn_sp = st.columns([0.6, 0.6, 3])
+    # 3줄: 조회하기 / 초기화 버튼
+    btn_col1, btn_col2, btn_sp = st.columns([0.6, 0.6, 3])
     search_clicked = False
     with btn_col1:
         if st.button("조회하기", key="mv_search_btn_csv"):
             search_clicked = True
     with btn_col2:
         st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+
 
 
 
