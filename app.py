@@ -609,12 +609,19 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 # ==============================
 # 업로드 시간 표시 유틸
 # ==============================
-def last_upload_caption(key: str) -> str:
-    ts = st.session_state.get(key)
-    if ts:
-        return f"마지막 업로드: {ts}"
-    return "마지막 업로드 이력 없음"
-
+def last_upload_caption(path: str) -> str:
+    """
+    파일의 실제 수정 시간(mtime)을 기반으로 마지막 업로드 시간을 반환.
+    파일이 없으면 '없음' 표시.
+    """
+    if os.path.exists(path):
+        try:
+            ts = os.path.getmtime(path)  # Unix timestamp
+            dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            return f"마지막 수정: {dt}"
+        except Exception:
+            return "마지막 수정 시간을 읽을 수 없음"
+    return "파일이 아직 존재하지 않습니다."
 
 # ==============================
 # 데이터 파일 업로드 화면 (최초 1회용)
