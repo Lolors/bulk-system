@@ -1454,7 +1454,8 @@ def render_tab_lookup():
     df_consumed = tmp[tmp["층"].isin(["소진", "폐기"])]               # 4번
 
     # ====== 1줄: 1번 + 2번 =====================
-    col1, col2 = st.columns(1.2, 1.2)
+    col1, col_empty = st.columns([1.2, 2.0])
+    col2, col_empty = st.columns([1.2, 2.0])
 
     with col1:
         show_summary_table(df_onsite, "1) 자사 위치 (2층 / 4층 / 5층 / 6층)")
@@ -1463,7 +1464,8 @@ def render_tab_lookup():
         show_summary_table(df_outsourcing, "2) 외주")
 
     # ====== 2줄: 3번 + 4번 =====================
-    col3, col4 = st.columns(1.2, 1.2)
+    col3, col_empty = st.columns([1.2, 2.0])
+    col4, col_empty = st.columns([1.2, 2.0])
 
     with col3:
         show_summary_table(df_warehouse, "3) 창고")
