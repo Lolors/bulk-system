@@ -270,6 +270,54 @@ def get_vision_client():
     _VISION_CLIENT = vision.ImageAnnotatorClient(credentials=creds)
     return _VISION_CLIENT
 
+def gcv_ocr_full_text(pil_img):
+    """이미지 전체 텍스트를 Google Cloud Vision으로 OCR."""
+    client = get_vision_client()
+    if client is None:
+        return ""
+
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    content = buf.getvalue()
+
+    image = vision.Image(content=content)
+
+    try:
+        response = client.text_detection(image=image)
+    except Exception as e:
+        st.error(f"Google Vision 호출 중 오류: {e}")
+        return ""
+
+    if response.error.message:
+        st.error(f"Google Vision 에러: {response.error.message}")
+        return ""
+
+    texts = response.text_annotations
+    if not texts:
+        return ""
+
+    # 첫 번째 항목이 전체 텍스트
+    return texts[0].description.strip()
+
+
+def extract_barcode_like_code(text: str) -> str:
+    """
+    OCR 결과에서 바코드 밑 코드처럼 생긴 문자열만 뽑아낸다.
+    예: H20240221-0010 형태 (알파벳 1자 + 숫자8 + '-' + 숫자4)
+    """
+    if not text:
+        return ""
+
+    compact = text.replace(" ", "").replace("\n", "")
+    m = re.search(r"[A-Z]\d{8}-\d{4}", compact)
+    if m:
+        return m.group(0)
+
+    # 패턴이 확실치 않으면, 숫자/하이픈 많이 섞인 덩어리 중 하나라도 반환
+    m2 = re.search(r"[A-Z0-9\-]{8,}", compact)
+    return m2.group(0) if m2 else ""
+
+
 # ==============================
 # 공통 유틸 (업로드/로컬 겸용)
 # ==============================
@@ -1009,9 +1057,20 @@ def render_tab_move():
 
                 codes = dbr_decode(img_raw)
 
+                text_code = ""
+
                 if codes:
                     _, text_code = codes[0]
-                    st.session_state["mv_scanned_barcode"] = text_code.strip()
+                    text_code = text_code.strip()
+
+                # DBR이 못 읽었으면 → Google Vision OCR로 바코드 아래 문자열 시도
+                if not text_code:
+                    full_text = gcv_ocr_full_text(img_raw)
+                    ocr_code = extract_barcode_like_code(full_text)
+                    text_code = ocr_code.strip()
+
+                if text_code:
+                    st.session_state["mv_scanned_barcode"] = text_code
                     st.success(f"인식됨: {text_code}")
                 else:
                     st.warning("바코드를 인식하지 못했습니다.")
