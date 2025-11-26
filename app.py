@@ -1571,7 +1571,7 @@ def render_tab_move_log():
 
 
 # ==============================
-# 탭 5: 데이터 파일 관리
+# 탭 5: 데이터 파일 관리 (메인 탭 중 데이터 탭)
 # ==============================
 def file_status(sess_key: str, path: str) -> str:
     ss = st.session_state
@@ -1598,7 +1598,9 @@ def render_tab_data():
             type=["csv"],
             key="data_up_bulk",
         )
-        st.caption(last_upload_caption("last_upload_bulk"))
+        # 🔽 실제 파일 수정 시간 기준 캡션
+        st.caption(last_upload_caption(CSV_PATH))
+
         if st.button("이 파일로 bulk CSV 교체", key="apply_bulk"):
             if bulk_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1606,13 +1608,11 @@ def render_tab_data():
                 data = bulk_file.read()
                 ss["bulk_csv_bytes"] = data
                 _load_drums_core.clear()
-                # 로컬에도 저장 (가능한 경우)
                 try:
                     df_tmp = _load_drums_core(data)
                     df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
-                ss["last_upload_bulk"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
     # --- production.xlsx ---
@@ -1623,7 +1623,8 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_prod",
         )
-        st.caption(last_upload_caption("last_upload_prod"))
+        st.caption(last_upload_caption(PRODUCTION_FILE))
+
         if st.button("이 파일로 production 교체", key="apply_prod"):
             if prod_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1636,7 +1637,6 @@ def render_tab_data():
                     df_tmp.to_excel(PRODUCTION_FILE, index=False)
                 except Exception:
                     pass
-                ss["last_upload_prod"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("production.xlsx가 교체되었습니다.")
 
     # --- receive.xlsx ---
@@ -1647,7 +1647,8 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_recv",
         )
-        st.caption(last_upload_caption("last_upload_recv"))
+        st.caption(last_upload_caption(RECEIVE_FILE))
+
         if st.button("이 파일로 receive 교체", key="apply_recv"):
             if recv_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1660,7 +1661,6 @@ def render_tab_data():
                     df_tmp.to_excel(RECEIVE_FILE, index=False)
                 except Exception:
                     pass
-                ss["last_upload_recv"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("receive.xlsx가 교체되었습니다.")
 
     # --- stock.xlsx ---
@@ -1671,7 +1671,8 @@ def render_tab_data():
             type=["xlsx"],
             key="data_up_stock",
         )
-        st.caption(last_upload_caption("last_upload_stock"))
+        st.caption(last_upload_caption(STOCK_FILE))
+
         if st.button("이 파일로 stock 교체", key="apply_stock"):
             if stock_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1684,7 +1685,6 @@ def render_tab_data():
                     df_tmp.to_excel(STOCK_FILE, index=False)
                 except Exception:
                     pass
-                ss["last_upload_stock"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("stock.xlsx가 교체되었습니다.")
 
     # --- bulk_move_log.csv ---
@@ -1695,7 +1695,8 @@ def render_tab_data():
             type=["csv"],
             key="data_up_move",
         )
-        st.caption(last_upload_caption("last_upload_move"))
+        st.caption(last_upload_caption(MOVE_LOG_CSV))
+
         if st.button("이 파일로 이동 이력 교체", key="apply_move"):
             if move_file is None:
                 st.warning("먼저 파일을 선택해 주세요.")
@@ -1708,7 +1709,6 @@ def render_tab_data():
                     df_tmp.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
-                ss["last_upload_move"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.success("bulk_move_log.csv가 교체되었습니다.")
 
     st.markdown("---")
@@ -1716,6 +1716,7 @@ def render_tab_data():
         "※ Cloud에서는 세션이 초기화되면 다시 업로드해야 합니다. "
         "중요한 변경 내용은 사이드바의 다운로드 버튼으로 CSV를 저장해 두세요."
     )
+
 
 
 # ==============================
@@ -1739,7 +1740,21 @@ def main():
 
     # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
     if not ss.get("data_initialized", False) and not files_ready:
-        render_file_loader()
+        bulk_file = st.file_uploader("1) bulk_drums_extended.csv (필수)", type=["csv"])
+        st.caption(last_upload_caption(CSV_PATH))
+
+        prod_file = st.file_uploader("2) production.xlsx (필수)", type=["xlsx"])
+        st.caption(last_upload_caption(PRODUCTION_FILE))
+
+        recv_file = st.file_uploader("3) receive.xlsx (필수)", type=["xlsx"])
+        st.caption(last_upload_caption(RECEIVE_FILE))
+
+        stock_file = st.file_uploader("4) stock.xlsx (필수)", type=["xlsx"])
+        st.caption(last_upload_caption(STOCK_FILE))
+
+        move_file = st.file_uploader("5) bulk_move_log.csv (선택)", type=["csv"])
+        st.caption(last_upload_caption(MOVE_LOG_CSV))
+
         return
 
     # 3) 사이드바: 사용자 정보 + 로그아웃 + (선택) CSV 다운로드 버튼
