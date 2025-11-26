@@ -152,18 +152,20 @@ def get_dbr_router():
 
 
 def preprocess_for_barcode(pil_img):
-    """흐릿한 라벨용 전처리."""
+    """
+    흐릿한 라벨용 전처리.
+    - 원본 비율 유지
+    - 너무 작은 이미지는 확대
+    """
     if Image is None:
         return pil_img
 
-    if pil_img.mode != "L":
-        img = pil_img.convert("L")
-    else:
-        img = pil_img.copy()
+    img = pil_img.copy()
 
-    img = ImageOps.autocontrast(img)
-    img = ImageEnhance.Sharpness(img).enhance(2.0)
+    # DBR은 컬러도 잘 읽기 때문에, 기본은 컬러 유지
+    # 필요할 경우 dbr_decode 안에서 흑백 버전을 별도로 만든다.
 
+    # 너무 작은 이미지는 확대
     min_side = min(img.size)
     if min_side < 800:
         scale = 800.0 / float(min_side)
@@ -176,43 +178,80 @@ def preprocess_for_barcode(pil_img):
 def dbr_decode(pil_img):
     """
     Dynamsoft DBR(CaptureVisionRouter)로만 바코드 디코딩.
+    여러 가지 버전(원본, 흑백, 크롭)을 시도해서
     성공하면 [(포맷, 텍스트), ...] 리스트를 반환.
     """
     cvr = get_dbr_router()
     if cvr is None or EnumPresetTemplate is None or EnumErrorCode is None:
         return []
 
-    img = preprocess_for_barcode(pil_img)
+    base = preprocess_for_barcode(pil_img)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    data = buf.getvalue()
+    if Image is None:
+        candidate_images = [base]
+    else:
+        # 1) 원본 컬러
+        candidate_images = [base]
 
-    try:
-        result = cvr.capture(data, EnumPresetTemplate.PT_READ_BARCODES)
-    except Exception:
-        return []
+        # 2) 흑백 + autocontrast + 샤픈
+        gray = base.convert("L")
+        gray = ImageOps.autocontrast(gray)
+        gray = ImageEnhance.Sharpness(gray).enhance(2.0)
+        candidate_images.append(gray)
 
-    err = result.get_error_code()
-    if err not in (
-        EnumErrorCode.EC_OK,
-        getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
-    ):
-        return []
+        # 3) 중앙 띠만 자른 크롭 (바코드가 가운데쯤에 있다고 가정)
+        w, h = base.size
+        band_top = int(h * 0.35)
+        band_bottom = int(h * 0.75)
+        if band_bottom > band_top:
+            center_band = base.crop((0, band_top, w, band_bottom))
+            candidate_images.append(center_band)
 
-    barcode_result = result.get_decoded_barcodes_result()
-    if barcode_result is None or barcode_result.get_items() == 0:
-        return []
+            # 중앙 띠의 흑백 버전
+            cb_gray = center_band.convert("L")
+            cb_gray = ImageOps.autocontrast(cb_gray)
+            cb_gray = ImageEnhance.Sharpness(cb_gray).enhance(2.0)
+            candidate_images.append(cb_gray)
 
-    items = barcode_result.get_items()
-    codes = []
-    for item in items:
-        text = (item.get_text() or "").strip()
-        fmt = (item.get_format_string() or "").strip()
-        if text:
-            codes.append((fmt, text))
+    # 후보 이미지들에 대해 순차적으로 시도
+    for idx, img in enumerate(candidate_images):
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        data = buf.getvalue()
 
-    return codes
+        try:
+            result = cvr.capture(data, EnumPresetTemplate.PT_READ_BARCODES)
+        except Exception:
+            continue
+
+        err = result.get_error_code()
+        if err not in (
+            EnumErrorCode.EC_OK,
+            getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
+        ):
+            continue
+
+        barcode_result = result.get_decoded_barcodes_result()
+        if barcode_result is None or barcode_result.get_items() == 0:
+            continue
+
+        items = barcode_result.get_items()
+        codes = []
+        for item in items:
+            try:
+                text = (item.get_text() or "").strip()
+                fmt = (item.get_format_string() or "").strip()
+            except Exception:
+                text, fmt = "", ""
+            if text:
+                codes.append((fmt, text))
+
+        if codes:
+            # 디버깅용 로그 (원하면 잠깐 켜두기)
+            # print(f"DBR decoded (candidate {idx}):", codes)
+            return codes
+
+    return []
 
 
 # ==============================
@@ -974,10 +1013,16 @@ def render_tab_move():
         # 📦 DBR 디코딩
         if image_bytes is not None:
             try:
-                img = Image.open(io.BytesIO(image_bytes))
-                st.image(img, caption=image_name, width=220)
+                # DBR 원본 전용
+                img_raw = Image.open(io.BytesIO(image_bytes))
+        
+                # Streamlit 표시용 (리사이즈 OK)
+                img_display = img_raw.copy()
+                st.image(img_display, caption=image_name, width=220)
 
-                codes = dbr_decode(img)
+                # DBR은 반드시 원본 이미지를 사용해야 함
+                codes = dbr_decode(img_raw)
+
                 if codes:
                     _, text_code = codes[0]
                     st.session_state["mv_scanned_barcode"] = text_code.strip()
