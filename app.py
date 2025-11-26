@@ -1412,32 +1412,57 @@ def render_tab_lookup():
     st.markdown("---")
     st.markdown("#### 📊 현재위치별 용량 요약")
 
-    summary = (
-        df_view.groupby("현재위치", dropna=False)
-        .agg(
-            통개수=("통번호", "count"),
-            총용량_kg=("통용량", "sum"),
+    def show_summary_table(df_part: pd.DataFrame, title: str, width: int = 400):
+        st.markdown(f"##### {title}")
+        if df_part.empty:
+            st.info("데이터가 없습니다.")
+            return
+
+        summary = (
+            df_part.groupby("현재위치", dropna=False)
+            .agg(
+                통개수=("통번호", "count"),
+                총용량_kg=("통용량", "sum"),
+            )
+            .reset_index()
+            .sort_values("현재위치")
         )
-        .reset_index()
-        .sort_values("현재위치")
-    )
 
-# ====== 🔥 합계 행 추가 ======
-    total_row = pd.DataFrame({
-        "현재위치": ["합계"],
-        "통개수": [summary["통개수"].sum()],
-        "총용량_kg": [summary["총용량_kg"].sum()],
-    })
+        # 합계 행 추가
+        total_row = pd.DataFrame({
+            "현재위치": ["합계"],
+            "통개수": [summary["통개수"].sum()],
+            "총용량_kg": [summary["총용량_kg"].sum()],
+        })
+        summary = pd.concat([summary, total_row], ignore_index=True)
 
-    summary = pd.concat([summary, total_row], ignore_index=True)
+        row_height = 35
+        header_height = 40
+        dynamic_height = header_height + row_height * (len(summary) + 1)
 
+        st.dataframe(summary, width=width, height=dynamic_height)
 
-    # 행 개수에 맞춰 높이 자동 조정
-    row_height = 35
-    header_height = 40
-    dynamic_height = header_height + row_height * (len(summary) + 1)
+    # 층(또는 구역) 기준으로 분류용 컬럼
+    tmp = df_view.copy()
+    tmp["층"] = tmp["현재위치"].astype(str).str.split("-").str[0]
 
-    st.dataframe(summary, width=300, height=dynamic_height)
+    # 1) 자사 위치: 2층, 4층, 5층, 6층
+    df_onsite = tmp[tmp["층"].isin(["2층", "4층", "5층", "6층"])]
+
+    # 2) 외주
+    df_outsourcing = tmp[tmp["층"] == "외주"]
+
+    # 3) 창고
+    df_warehouse = tmp[tmp["층"] == "창고"]
+
+    # 4) 소진 + 폐기
+    df_consumed = tmp[tmp["층"].isin(["소진", "폐기"])]
+
+    # 표 4개 출력
+    show_summary_table(df_onsite, "1) 자사 위치 (2층 / 4층 / 5층 / 6층)")
+    show_summary_table(df_outsourcing, "2) 외주")
+    show_summary_table(df_warehouse, "3) 창고")
+    show_summary_table(df_consumed, "4) 소진 / 폐기")
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
