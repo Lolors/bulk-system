@@ -1194,16 +1194,17 @@ def render_tab_move():
         drum_new_qty = {}
 
         drum_list = lot_df["통번호"].tolist()
-        # 모두 선택 / 모두 해제
-        c1, c_sp, c2, _c_gap = st.columns([1, 0.05, 1, 6])
+        # 모두 선택 / 모두 해제  - 버튼 폭을 조금만 사용하는 좁은 컬럼
+        c1, c_sp, c2, _c_gap = st.columns([0.5, 0.05, 0.5, 7])
         with c1:
-            if st.button("모두 선택", key=f"mv_select_all_{lot}"):
+            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = True
         with c2:
-            if st.button("모두 해제", key=f"mv_select_none_{lot}"):
+            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=False):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = False
+
 
         for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
