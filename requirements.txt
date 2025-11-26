@@ -5,3 +5,5 @@ Pillow
 
 dynamsoft-barcode-reader-bundle
 boto3
+streamlit-webrtc==0.47.1
+
