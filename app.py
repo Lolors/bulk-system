@@ -1412,24 +1412,24 @@ def render_tab_lookup():
     st.markdown("---")
     st.markdown("#### 📊 현재위치별 용량 요약")
 
-summary = (
-    df_view.groupby("현재위치", dropna=False)
-    .agg(
-        통개수=("통번호", "count"),
-        총용량_kg=("통용량", "sum"),
+    summary = (
+        df_view.groupby("현재위치", dropna=False)
+        .agg(
+            통개수=("통번호", "count"),
+            총용량_kg=("통용량", "sum"),
+        )
+        .reset_index()
+        .sort_values("현재위치")
     )
-    .reset_index()
-    .sort_values("현재위치")
-)
 
 # ====== 🔥 합계 행 추가 ======
-total_row = pd.DataFrame({
-    "현재위치": ["합계"],
-    "통개수": [summary["통개수"].sum()],
-    "총용량_kg": [summary["총용량_kg"].sum()],
-})
+    total_row = pd.DataFrame({
+        "현재위치": ["합계"],
+        "통개수": [summary["통개수"].sum()],
+        "총용량_kg": [summary["총용량_kg"].sum()],
+    })
 
-summary = pd.concat([summary, total_row], ignore_index=True)
+    summary = pd.concat([summary, total_row], ignore_index=True)
 
 
     # 행 개수에 맞춰 높이 자동 조정
