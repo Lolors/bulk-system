@@ -1011,7 +1011,7 @@ def render_tab_move():
             self.last_frame = None
 
         def transform(self, frame):
-            # 최신 프레임을 저장해 두고, 화면에는 그대로 보여줌
+            # 최신 프레임 저장 + 화면에는 그대로 보여줌
             self.last_frame = frame
             return frame
 
@@ -1022,31 +1022,31 @@ def render_tab_move():
             "video": {
                 "width": {"ideal": 1920},
                 "height": {"ideal": 1080},
-                "facingMode": "environment",  # 모바일에서 후면 카메라 우선
+                "facingMode": "environment",
             },
             "audio": False,
         },
     )
 
-    # 촬영 버튼 & DBR 인식
-    if ctx.video_transformer:
-        if st.button("📸 이 화면으로 촬영", key="mv_capture_webrtc"):
+    capture_clicked = st.button("📸 이 화면으로 촬영", key="mv_capture_webrtc")
+
+    if capture_clicked:
+        if ctx and ctx.video_transformer and ctx.video_transformer.last_frame is not None:
             frame = ctx.video_transformer.last_frame
-            if frame is not None:
-                img_raw = frame.to_image()  # PIL.Image 로 변환
+            img_raw = frame.to_image()
 
-                st.image(img_raw, caption="촬영된 원본", width=300)
+            st.image(img_raw, caption="촬영된 원본", width=300)
 
-                codes = dbr_decode(img_raw)
-                if codes:
-                    _, text_code = codes[0]
-                    text_code = text_code.strip()
-                    st.session_state["mv_scanned_barcode"] = text_code
-                    st.success(f"인식됨: {text_code}")
-                else:
-                    st.error("바코드를 인식하지 못했습니다.")
+            codes = dbr_decode(img_raw)
+            if codes:
+                _, text_code = codes[0]
+                text_code = text_code.strip()
+                st.session_state["mv_scanned_barcode"] = text_code
+                st.success(f"인식됨: {text_code}")
             else:
-                st.warning("아직 카메라 영상이 준비되지 않았습니다. 잠시 후 다시 눌러 주세요.")
+                st.error("바코드를 인식하지 못했습니다.")
+        else:
+            st.warning("아직 카메라 영상이 준비되지 않았습니다. 1~2초 후에 다시 눌러 주세요.")
 
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
