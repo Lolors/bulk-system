@@ -988,25 +988,6 @@ def render_tab_move():
             except Exception as e:
                 st.error(f"이미지를 처리하는 중 오류 발생: {e}")
 
-    # ================== 3줄: 조회 / 초기화 버튼 ==================
-    st.write("")
-    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
-
-    search_clicked = False
-    with btn_col1:
-        if st.button("조회하기", key="mv_search_btn_csv"):
-            search_clicked = True
-
-    with btn_col2:
-        st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
-
-    # 조회 버튼 처리
-    if search_clicked:
-        # 👉 여기 아래에 기존 조회 로직 붙이면 됨
-        # ex) run_move_search()
-        pass
-
-
 
     # ================== 3줄: 조회 / 초기화 버튼 ==================
     st.write("")
