@@ -827,28 +827,28 @@ def render_file_loader():
 
     with col_left:
         bulk_file = st.file_uploader(
-            "1) bulk_drums_extended.csv",
+            "1) bulk_drums_extended.csv (필수)",
             type=["csv"],
             key="first_up_bulk",
         )
         st.caption(last_upload_caption(CSV_PATH))
 
         prod_file = st.file_uploader(
-            "2) production.xlsx (제조작업실적현황)",
+            "2) production.xlsx (필수)",
             type=["xlsx"],
             key="first_up_prod",
         )
         st.caption(last_upload_caption(PRODUCTION_FILE))
 
         recv_file = st.file_uploader(
-            "3) receive.xlsx (입하현황)",
+            "3) receive.xlsx (필수)",
             type=["xlsx"],
             key="first_up_recv",
         )
         st.caption(last_upload_caption(RECEIVE_FILE))
 
         stock_file = st.file_uploader(
-            "4) stock.xlsx (일자별통합재고현황)",
+            "4) stock.xlsx (필수)",
             type=["xlsx"],
             key="first_up_stock",
         )
@@ -856,7 +856,7 @@ def render_file_loader():
 
     with col_right:
         move_file = st.file_uploader(
-            "5) bulk_move_log.csv",
+            "5) bulk_move_log.csv (선택)",
             type=["csv"],
             key="first_up_move",
         )
@@ -1977,7 +1977,7 @@ def render_tab_data():
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
     # --- production.xlsx ---
-    with st.expander("2) production.xlsx (자사 작업번호)", expanded=False):
+    with st.expander("2) production.xlsx (제조작업실적현황)", expanded=False):
         st.write("현재 상태:", file_status("prod_xlsx_bytes", PRODUCTION_FILE))
         prod_file = st.file_uploader(
             "새 production.xlsx 업로드",
@@ -2001,7 +2001,7 @@ def render_tab_data():
                 st.success("production.xlsx가 교체되었습니다.")
 
     # --- receive.xlsx ---
-    with st.expander("3) receive.xlsx (사급 입하번호)", expanded=False):
+    with st.expander("3) receive.xlsx (입하현황)", expanded=False):
         st.write("현재 상태:", file_status("recv_xlsx_bytes", RECEIVE_FILE))
         recv_file = st.file_uploader(
             "새 receive.xlsx 업로드",
@@ -2025,7 +2025,7 @@ def render_tab_data():
                 st.success("receive.xlsx가 교체되었습니다.")
 
     # --- stock.xlsx ---
-    with st.expander("4) stock.xlsx (전산 재고)", expanded=False):
+    with st.expander("4) stock.xlsx (일자별통합재고현황)", expanded=False):
         st.write("현재 상태:", file_status("stock_xlsx_bytes", STOCK_FILE))
         stock_file = st.file_uploader(
             "새 stock.xlsx 업로드",
