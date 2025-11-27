@@ -827,28 +827,28 @@ def render_file_loader():
 
     with col_left:
         bulk_file = st.file_uploader(
-            "1) bulk_drums_extended.csv (필수)",
+            "1) bulk_drums_extended.csv",
             type=["csv"],
             key="first_up_bulk",
         )
         st.caption(last_upload_caption(CSV_PATH))
 
         prod_file = st.file_uploader(
-            "2) production.xlsx (필수)",
+            "2) production.xlsx (제조작업실적현황)",
             type=["xlsx"],
             key="first_up_prod",
         )
         st.caption(last_upload_caption(PRODUCTION_FILE))
 
         recv_file = st.file_uploader(
-            "3) receive.xlsx (필수)",
+            "3) receive.xlsx (입하현황)",
             type=["xlsx"],
             key="first_up_recv",
         )
         st.caption(last_upload_caption(RECEIVE_FILE))
 
         stock_file = st.file_uploader(
-            "4) stock.xlsx (필수)",
+            "4) stock.xlsx (일자별통합재고현황)",
             type=["xlsx"],
             key="first_up_stock",
         )
@@ -856,7 +856,7 @@ def render_file_loader():
 
     with col_right:
         move_file = st.file_uploader(
-            "5) bulk_move_log.csv (선택)",
+            "5) bulk_move_log.csv",
             type=["csv"],
             key="first_up_move",
         )
