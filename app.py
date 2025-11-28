@@ -2234,21 +2234,8 @@ def main():
 
     # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
     if not ss.get("data_initialized", False) and not files_ready:
-        bulk_file = st.file_uploader("1) bulk_drums_extended.csv (필수)", type=["csv"])
-        st.caption(last_upload_caption(CSV_PATH))
-
-        prod_file = st.file_uploader("2) production.xlsx (필수)", type=["xlsx"])
-        st.caption(last_upload_caption(PRODUCTION_FILE))
-
-        recv_file = st.file_uploader("3) receive.xlsx (필수)", type=["xlsx"])
-        st.caption(last_upload_caption(RECEIVE_FILE))
-
-        stock_file = st.file_uploader("4) stock.xlsx (필수)", type=["xlsx"])
-        st.caption(last_upload_caption(STOCK_FILE))
-
-        move_file = st.file_uploader("5) bulk_move_log.csv (선택)", type=["csv"])
-        st.caption(last_upload_caption(MOVE_LOG_CSV))
-
+        # 🔹 간이 업로드 말고, 우리가 만든 정식 업로드 화면 호출
+        render_file_loader()
         return
 
     # 3) 사이드바: 사용자 정보 + 로그아웃 + (선택) CSV 다운로드 버튼
