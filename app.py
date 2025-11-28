@@ -55,8 +55,10 @@ import boto3
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "bulk-system-enc")
 S3_PREFIX = os.getenv("S3_PREFIX", "bulk-app/")  # 폴더 경로
 
+
 def s3_enabled() -> bool:
     return bool(S3_BUCKET_NAME)
+
 
 @st.cache_resource(show_spinner=False)
 def get_s3_client():
@@ -67,6 +69,7 @@ def get_s3_client():
     except Exception:
         return None
 
+
 def _s3_key(filename: str) -> str:
     """
     S3에서 저장되는 경로를 결정.
@@ -74,6 +77,47 @@ def _s3_key(filename: str) -> str:
     """
     prefix = S3_PREFIX.rstrip("/")
     return f"{prefix}/{filename}" if prefix else filename
+
+
+def s3_upload_bytes(filename: str, data: bytes):
+    """
+    업로드된 파일 바이트를 S3에 저장.
+    filename: 로컬에서 사용하는 파일명을 그대로 넘기면 _s3_key로 S3 경로 변환.
+    """
+    if not s3_enabled():
+        return
+    client = get_s3_client()
+    if not client:
+        return
+    try:
+        client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=_s3_key(filename),
+            Body=data,
+        )
+    except Exception:
+        # S3 오류가 나더라도 앱 전체는 죽지 않게 조용히 무시
+        pass
+
+
+def s3_download_bytes(filename: str):
+    """
+    S3에서 파일을 읽어와서 bytes로 반환.
+    없거나 오류면 None 반환.
+    """
+    if not s3_enabled():
+        return None
+    client = get_s3_client()
+    if not client:
+        return None
+    try:
+        resp = client.get_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=_s3_key(filename),
+        )
+        return resp["Body"].read()
+    except Exception:
+        return None
 
 
 # ==============================
@@ -167,9 +211,6 @@ def preprocess_for_barcode(pil_img):
 
     img = pil_img.copy()
 
-    # DBR은 컬러도 잘 읽기 때문에, 기본은 컬러 유지
-    # 필요할 경우 dbr_decode 안에서 흑백 버전을 별도로 만든다.
-
     # 너무 작은 이미지는 확대
     min_side = min(img.size)
     if min_side < 800:
@@ -178,6 +219,7 @@ def preprocess_for_barcode(pil_img):
         img = img.resize(new_size, Image.LANCZOS)
 
     return img
+
 
 def dbr_decode(pil_img):
     """
@@ -215,8 +257,6 @@ def dbr_decode(pil_img):
             EnumErrorCode.EC_OK,
             getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
         ):
-            # 디버깅용 (원하면 잠깐 켜두기)
-            # st.write("DBR error:", err_code, result.get_error_string())
             return []
 
         barcode_result = result.get_decoded_barcodes_result()
@@ -234,27 +274,24 @@ def dbr_decode(pil_img):
             if text:
                 codes.append((fmt, text))
 
-        # 디버깅용 출력
-        # print("DBR decoded:", codes)
-
         return codes
 
-    except Exception as e:
-        # st.write("DBR exception:", e)
+    except Exception:
         return []
 
     finally:
-        # 4) 임시 파일 삭제
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
             except Exception:
                 pass
 
+
 # ==============================
 # Google Cloud Vision OCR
 # ==============================
 _VISION_CLIENT = None
+
 
 def get_vision_client():
     """st.secrets에 저장된 서비스 계정 정보를 이용해 Vision 클라이언트 생성."""
@@ -270,6 +307,7 @@ def get_vision_client():
     creds = service_account.Credentials.from_service_account_info(dict(info))
     _VISION_CLIENT = vision.ImageAnnotatorClient(credentials=creds)
     return _VISION_CLIENT
+
 
 def gcv_ocr_full_text(pil_img):
     """이미지 전체 텍스트를 Google Cloud Vision으로 OCR."""
@@ -320,11 +358,11 @@ def extract_barcode_like_code(text: str) -> str:
 
 
 # ==============================
-# 공통 유틸 (업로드/로컬 겸용)
+# 공통 유틸 (업로드/로컬/S3 겸용)
 # ==============================
 @st.cache_data(show_spinner=False)
 def _load_drums_core(bulk_bytes):
-    """bulk_drums_extended.csv 로드 (세션 업로드 우선, 없으면 로컬 파일)."""
+    """bulk_drums_extended.csv 로드 (세션 업로드 > 로컬 > S3 순서)."""
     # 1) 세션에 업로드된 파일이 있으면 그걸 우선 사용
     if bulk_bytes is not None:
         try:
@@ -363,21 +401,41 @@ def _load_drums_core(bulk_bytes):
                     "현재위치",
                 ]
             )
-    # 3) 둘 다 없으면 빈 DF
+    # 3) 로컬도 없으면 S3에서 시도
     else:
-        return pd.DataFrame(
-            columns=[
-                "품목코드",
-                "품명",
-                "로트번호",
-                "제품라인",
-                "제조일자",
-                "상태",
-                "통번호",
-                "통용량",
-                "현재위치",
-            ]
-        )
+        s3_bytes = s3_download_bytes(CSV_PATH)
+        if s3_bytes is not None:
+            try:
+                df = pd.read_csv(io.BytesIO(s3_bytes))
+            except Exception as e:
+                st.error(f"S3의 bulk_drums_extended.csv를 읽는 중 오류가 발생했습니다: {e}")
+                return pd.DataFrame(
+                    columns=[
+                        "품목코드",
+                        "품명",
+                        "로트번호",
+                        "제품라인",
+                        "제조일자",
+                        "상태",
+                        "통번호",
+                        "통용량",
+                        "현재위치",
+                    ]
+                )
+        else:
+            return pd.DataFrame(
+                columns=[
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
+                ]
+            )
 
     required_cols = [
         "품목코드",
@@ -424,11 +482,13 @@ def save_drums(df: pd.DataFrame):
     현재 DF를 bulk_drums_extended.csv로 저장.
     - 세션 메모리(업로드 방식) 갱신
     - 로컬 파일도 있으면 덮어쓰기 (로컬 실행용)
+    - S3에도 업로드
     """
     # 1) 세션 메모리 갱신
     buf = io.BytesIO()
     df.to_csv(buf, index=False, encoding="utf-8-sig")
-    st.session_state["bulk_csv_bytes"] = buf.getvalue()
+    data = buf.getvalue()
+    st.session_state["bulk_csv_bytes"] = data
 
     # 캐시 무효화
     _load_drums_core.clear()
@@ -439,6 +499,9 @@ def save_drums(df: pd.DataFrame):
     except Exception:
         # Cloud 환경에서는 보통 권한/경로가 없으니 조용히 무시
         pass
+
+    # 3) S3 업로드
+    s3_upload_bytes(CSV_PATH, data)
 
 
 @st.cache_data(show_spinner=False)
@@ -454,7 +517,15 @@ def _load_production_core(prod_bytes):
         except Exception:
             return pd.DataFrame()
     else:
-        return pd.DataFrame()
+        # 로컬도 없으면 S3 시도
+        s3_bytes = s3_download_bytes(PRODUCTION_FILE)
+        if s3_bytes is not None:
+            try:
+                df = pd.read_excel(io.BytesIO(s3_bytes))
+            except Exception:
+                return pd.DataFrame()
+        else:
+            return pd.DataFrame()
 
     required = ["작업번호", "품번", "품명", "LOTNO", "지시수량", "제조량", "작업일자"]
     for c in required:
@@ -484,7 +555,15 @@ def _load_receive_core(recv_bytes):
             st.error(f"receive.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
             return pd.DataFrame()
     else:
-        return pd.DataFrame()
+        s3_bytes = s3_download_bytes(RECEIVE_FILE)
+        if s3_bytes is not None:
+            try:
+                df = pd.read_excel(io.BytesIO(s3_bytes))
+            except Exception as e:
+                st.error(f"S3의 receive.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
+                return pd.DataFrame()
+        else:
+            return pd.DataFrame()
     return df
 
 
@@ -509,7 +588,15 @@ def _load_stock_core(stock_bytes):
             st.error(f"stock.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
             return pd.DataFrame()
     else:
-        return pd.DataFrame()
+        s3_bytes = s3_download_bytes(STOCK_FILE)
+        if s3_bytes is not None:
+            try:
+                df = pd.read_excel(io.BytesIO(s3_bytes))
+            except Exception as e:
+                st.error(f"S3의 stock.xlsx 파일을 읽는 중 오류가 발생했습니다: {e}")
+                return pd.DataFrame()
+        else:
+            return pd.DataFrame()
     return df
 
 
@@ -553,6 +640,8 @@ def classify_product_line(item_code: str) -> str:
     if code in FACIAL_CODES:
         return "페이셜"
     return ""
+
+
 def add_tat_column(df: pd.DataFrame) -> pd.DataFrame:
     """
     df에 'TAT' 컬럼을 추가해서 제조일자로부터 오늘까지 경과 개월 수를 채워준다.
@@ -584,6 +673,7 @@ def add_tat_column(df: pd.DataFrame) -> pd.DataFrame:
     df["TAT"] = tat_months.astype("Int64")
 
     return df
+
 
 def generate_drums(prod_qty_kg: float):
     """제조량(kg)을 받아서 통번호/용량을 자동 생성."""
@@ -654,7 +744,7 @@ def ensure_lot_in_csv(
 
 
 # ==============================
-# 이동 LOG 유틸 (ID 포함, 업로드/세션 겸용)
+# 이동 LOG 유틸 (ID 포함, 업로드/세션/S3 겸용)
 # ==============================
 @st.cache_data(show_spinner=False)
 def _load_move_log_core(move_bytes):
@@ -686,7 +776,15 @@ def _load_move_log_core(move_bytes):
             st.error(f"이동 이력 파일을 읽는 중 오류가 발생했습니다: {e}")
             return pd.DataFrame(columns=default_cols)
     else:
-        return pd.DataFrame(columns=default_cols)
+        s3_bytes = s3_download_bytes(MOVE_LOG_CSV)
+        if s3_bytes is not None:
+            try:
+                df = pd.read_csv(io.BytesIO(s3_bytes))
+            except Exception as e:
+                st.error(f"S3의 이동 이력 파일을 읽는 중 오류가 발생했습니다: {e}")
+                return pd.DataFrame(columns=default_cols)
+        else:
+            return pd.DataFrame(columns=default_cols)
 
     # 예전 로그에 ID열이 없을 수도 있으니 보정
     for c in default_cols:
@@ -738,7 +836,7 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 
     new_df = pd.DataFrame(rows)
 
-    # 기존 로그 불러오기 (세션/로컬)
+    # 기존 로그 불러오기 (세션/로컬/S3)
     if "move_log_csv_bytes" in ss:
         try:
             old_df = pd.read_csv(io.BytesIO(ss["move_log_csv_bytes"]))
@@ -750,14 +848,22 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
         except Exception:
             old_df = pd.DataFrame()
     else:
-        old_df = pd.DataFrame()
+        s3_bytes = s3_download_bytes(MOVE_LOG_CSV)
+        if s3_bytes is not None:
+            try:
+                old_df = pd.read_csv(io.BytesIO(s3_bytes))
+            except Exception:
+                old_df = pd.DataFrame()
+        else:
+            old_df = pd.DataFrame()
 
     log_df = pd.concat([old_df, new_df], ignore_index=True)
 
     # 1) 세션에 다시 저장
     buf = io.BytesIO()
     log_df.to_csv(buf, index=False, encoding="utf-8-sig")
-    ss["move_log_csv_bytes"] = buf.getvalue()
+    data = buf.getvalue()
+    ss["move_log_csv_bytes"] = data
 
     _load_move_log_core.clear()
 
@@ -767,14 +873,18 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
     except Exception:
         pass
 
+    # 3) S3 업로드
+    s3_upload_bytes(MOVE_LOG_CSV, data)
+
+
 # ==============================
 # 업로드 시간 표시 유틸  (S3 → 로컬 순으로 확인)
 # ==============================
-from datetime import datetime
+from datetime import datetime as dt_for_caption
+
 
 @st.cache_data(show_spinner=False, ttl=60)
 def last_upload_caption(filename: str) -> str:
-
     """
     1) S3 객체가 있으면 그 객체의 LastModified 시간을 표시
     2) 없으면 로컬 파일 수정시간을 표시
@@ -797,14 +907,13 @@ def last_upload_caption(filename: str) -> str:
     if os.path.exists(filename):
         try:
             ts = os.path.getmtime(filename)
-            dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            dt = dt_for_caption.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
             return f"로컬 마지막 수정: {dt}"
         except Exception:
             return "로컬 파일 시간 읽기 오류"
 
     # 3) 둘 다 없음 ----------------------------------------------
     return "업로드된 파일이 없습니다."
-
 
 
 # ==============================
@@ -892,13 +1001,20 @@ def render_file_loader():
         if move_bytes is not None:
             ss["move_log_csv_bytes"] = move_bytes
 
+        # 🔹 S3 업로드 (원본 바이트 그대로 보관)
+        s3_upload_bytes(CSV_PATH, bulk_bytes)
+        s3_upload_bytes(PRODUCTION_FILE, prod_bytes)
+        s3_upload_bytes(RECEIVE_FILE, recv_bytes)
+        s3_upload_bytes(STOCK_FILE, stock_bytes)
+        if move_bytes is not None:
+            s3_upload_bytes(MOVE_LOG_CSV, move_bytes)
+
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.caption(last_upload_caption(CSV_PATH))
         st.caption(last_upload_caption(PRODUCTION_FILE))
         st.caption(last_upload_caption(RECEIVE_FILE))
         st.caption(last_upload_caption(STOCK_FILE))
         st.caption(last_upload_caption(MOVE_LOG_CSV))
-
 
         # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
         try:
@@ -1106,7 +1222,6 @@ def render_tab_move():
 
     with btn_col2:
         st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
-
 
     # 조회 버튼 처리
     if "search_clicked" in locals() and search_clicked:
@@ -1374,12 +1489,11 @@ def render_tab_move():
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
-
         selected_drums = []
         drum_new_qty = {}
 
         drum_list = lot_df["통번호"].tolist()
-        # 모두 선택 / 모두 해제  - 버튼 폭을 조금만 사용하는 좁은 컬럼
+        # 모두 선택 / 모두 해제
         c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
@@ -1389,7 +1503,6 @@ def render_tab_move():
             if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=False):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = False
-
 
         for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
@@ -1517,7 +1630,6 @@ def render_tab_move():
                 st.dataframe(sub, use_container_width=True)
 
 
-
 # ==============================
 # 탭 2: 조회
 # ==============================
@@ -1528,10 +1640,10 @@ def render_tab_lookup():
     if df.empty:
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
-        
+
     # ✅ 제조일자 기준 TAT(개월) 컬럼 추가
     df = add_tat_column(df)
-    
+
     query = st.text_input("로트번호, 품목코드 또는 품명을 입력해 주세요.")
     if query:
         q = query.strip()
@@ -1550,8 +1662,6 @@ def render_tab_lookup():
     # 기본(default) 상태는 0 제외
     if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
-
-
 
     if df_view.empty:
         st.warning("검색 결과가 없습니다.")
@@ -1621,7 +1731,6 @@ def render_tab_lookup():
         backup_name = f"bulk_drums_extended_backup_{ts}.csv"
         df.to_csv(backup_name, index=False, encoding="utf-8-sig")
         st.success(f"백업 파일로 저장되었습니다: {backup_name}")
-
 
 
 # ==============================
@@ -1796,7 +1905,7 @@ def render_tab_move_log():
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_page", 1)
 
-    # ▶ 검색 초기화 콜백 (여기서만 state 수정)
+    # ▶ 검색 초기화 콜백
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
@@ -1885,12 +1994,15 @@ def render_tab_move_log():
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
         df_updated.to_csv(buf, index=False, encoding="utf-8-sig")
-        ss["move_log_csv_bytes"] = buf.getvalue()
+        data = buf.getvalue()
+        ss["move_log_csv_bytes"] = data
         _load_move_log_core.clear()
         try:
             df_updated.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
         except Exception:
             pass
+        # S3에도 저장
+        s3_upload_bytes(MOVE_LOG_CSV, data)
 
     col_save, col_delete = st.columns(2)
 
@@ -1974,6 +2086,8 @@ def render_tab_data():
                     df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
+                # 🔹 S3 업로드
+                s3_upload_bytes(CSV_PATH, data)
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
     # --- production.xlsx ---
@@ -1998,6 +2112,7 @@ def render_tab_data():
                     df_tmp.to_excel(PRODUCTION_FILE, index=False)
                 except Exception:
                     pass
+                s3_upload_bytes(PRODUCTION_FILE, data)
                 st.success("production.xlsx가 교체되었습니다.")
 
     # --- receive.xlsx ---
@@ -2022,6 +2137,7 @@ def render_tab_data():
                     df_tmp.to_excel(RECEIVE_FILE, index=False)
                 except Exception:
                     pass
+                s3_upload_bytes(RECEIVE_FILE, data)
                 st.success("receive.xlsx가 교체되었습니다.")
 
     # --- stock.xlsx ---
@@ -2046,6 +2162,7 @@ def render_tab_data():
                     df_tmp.to_excel(STOCK_FILE, index=False)
                 except Exception:
                     pass
+                s3_upload_bytes(STOCK_FILE, data)
                 st.success("stock.xlsx가 교체되었습니다.")
 
     # --- bulk_move_log.csv ---
@@ -2070,6 +2187,7 @@ def render_tab_data():
                     df_tmp.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
+                s3_upload_bytes(MOVE_LOG_CSV, data)
                 st.success("bulk_move_log.csv가 교체되었습니다.")
 
     st.markdown("---")
@@ -2079,10 +2197,25 @@ def render_tab_data():
     )
 
 
-
 # ==============================
 # 메인
 # ==============================
+def has_data(sess_key: str, path: str) -> bool:
+    """
+    세션, 로컬 파일, S3 중 하나라도 있으면 True.
+    """
+    ss = st.session_state
+    if sess_key in ss:
+        return True
+    if os.path.exists(path):
+        return True
+    # 마지막으로 S3 확인
+    b = s3_download_bytes(path)
+    if b is not None:
+        return True
+    return False
+
+
 def main():
     ss = st.session_state
 
@@ -2093,10 +2226,10 @@ def main():
 
     # 2) 필수 데이터 파일 준비 여부 확인
     files_ready = (
-        ("bulk_csv_bytes" in ss or os.path.exists(CSV_PATH))
-        and ("prod_xlsx_bytes" in ss or os.path.exists(PRODUCTION_FILE))
-        and ("recv_xlsx_bytes" in ss or os.path.exists(RECEIVE_FILE))
-        and ("stock_xlsx_bytes" in ss or os.path.exists(STOCK_FILE))
+        has_data("bulk_csv_bytes", CSV_PATH)
+        and has_data("prod_xlsx_bytes", PRODUCTION_FILE)
+        and has_data("recv_xlsx_bytes", RECEIVE_FILE)
+        and has_data("stock_xlsx_bytes", STOCK_FILE)
     )
 
     # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
