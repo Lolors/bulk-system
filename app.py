@@ -19,6 +19,29 @@ USER_ACCOUNTS = {
     "hn": {"password": "0000", "display_name": "김한나"},
 }
 
+# =======
+# 지도용 박스 스타일 (한 번만 선언)
+# ======
+
+if "map_css_loaded" not in st.session_state:
+    st.markdown("""
+    <style>
+    .map-box {
+        border: 2px solid #666;
+        border-radius: 12px;
+        width: 520px;
+        height: 320px;
+        margin: auto;
+        padding: 16px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    st.session_state["map_css_loaded"] = True
+
 # ==============================
 # 기본 설정 + CSS
 # ==============================
@@ -1844,50 +1867,35 @@ def render_tab_map():
         else:
             return "🟡"
 
-    # === 여기부터 새 코드: 사각형 도면 + 3x3 구역 버튼 ===
+    # === 새 도면 + 3×3 구역 버튼 (박스 안에) ===
     st.markdown(f"#### {sel_floor} 도면 (예시)")
 
-    # 바깥 사각형(도면 박스) 느낌용 HTML
-    st.markdown(
-        """
-        <div style="
-            width:520px;
-            height:320px;
-            border:2px solid #666;
-            border-radius:12px;
-            margin:auto;
-            padding:12px;
-            box-sizing:border-box;
-        ">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container():
+        # 박스 시작
+        st.markdown('<div class="map-box">', unsafe_allow_html=True)
 
-    st.write("")  # 여백
+        # 3×3 그리드 (A1~C3)
+        for row in ["A", "B", "C"]:
+            cols = st.columns(3)
+            for i, col in enumerate(cols):
+                label = f"{row}{i+1}"
+                info = zone_stats.get(label, {"drums": 0, "volume": 0})
 
-    st.markdown("#### 구역 선택 (A1 ~ C3)")
+                btn_text = (
+                    f"{label} {badge(info['volume'])}  "
+                    f"{info['drums']}통 / {int(info['volume'])}kg"
+                )
 
-    # 3x3 그리드로 A1~C3 버튼 배치
-    for row in ["A", "B", "C"]:
-        cols = st.columns(3)
-        for i, col in enumerate(cols):
-            label = f"{row}{i+1}"
-            info = zone_stats.get(label, {"drums": 0, "volume": 0})
+                with col:
+                    if st.button(
+                        btn_text,
+                        key=f"map_btn_{sel_floor}_{label}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
 
-            btn_text = (
-                f"{label} {badge(info['volume'])}\n"
-                f"{info['drums']}통 / {int(info['volume'])}kg"
-            )
-
-            with col:
-                if st.button(
-                    btn_text,
-                    key=f"map_btn_{sel_floor}_{label}",
-                    use_container_width=True,
-                ):
-                    st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
-    # === 새 코드 끝 ===
+        # 박스 끝
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
     st.markdown("---")
