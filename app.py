@@ -1861,66 +1861,35 @@ def render_tab_map():
         else:
             return "🟡"
 
-    # === 도면 + HTML 버튼 9개 (A1~C3) ===
+    # === 도면 + 3×3 구역 버튼 (A1~C3) ===
     st.markdown(f"#### {sel_floor} 도면 (예시)")
 
     # 각 Zone별 텍스트 생성
     zone_display = {}
-    for label in labels_all:  # labels_all = ["A1","A2",...,"C3"]
+    for label in labels_all:  # ["A1","A2",...,"C3"]
         info = zone_stats.get(label, {"drums": 0, "volume": 0})
-        zone_display[label] = f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
+        zone_display[label] = (
+            f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
+        )
 
-    # HTML 도면 + 버튼 (절대 좌표로 3x3 정렬)
-    html_map = f"""<div class="map-box">
-<form method="get">
+    # 테두리 박스 안에 3×3 Streamlit 버튼 배치
+    with st.container():
+        st.markdown('<div class="map-box">', unsafe_allow_html=True)
 
-<button class="zone-btn" name="zone" value="A1" style="top:30px; left:40px;">
-A1<br>{zone_display['A1']}
-</button>
+        for row in ["A", "B", "C"]:
+            cols = st.columns(3)
+            for i, col in enumerate(cols):
+                label = f"{row}{i+1}"  # A1~C3
+                text = f"{label}  {zone_display[label]}"
+                with col:
+                    if st.button(
+                        text,
+                        key=f"map_btn_{sel_floor}_{label}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
 
-<button class="zone-btn" name="zone" value="A2" style="top:30px; left:200px;">
-A2<br>{zone_display['A2']}
-</button>
-
-<button class="zone-btn" name="zone" value="A3" style="top:30px; left:360px;">
-A3<br>{zone_display['A3']}
-</button>
-
-<button class="zone-btn" name="zone" value="B1" style="top:130px; left:40px;">
-B1<br>{zone_display['B1']}
-</button>
-
-<button class="zone-btn" name="zone" value="B2" style="top:130px; left:200px;">
-B2<br>{zone_display['B2']}
-</button>
-
-<button class="zone-btn" name="zone" value="B3" style="top:130px; left:360px;">
-B3<br>{zone_display['B3']}
-</button>
-
-<button class="zone-btn" name="zone" value="C1" style="top:230px; left:40px;">
-C1<br>{zone_display['C1']}
-</button>
-
-<button class="zone-btn" name="zone" value="C2" style="top:230px; left:200px;">
-C2<br>{zone_display['C2']}
-</button>
-
-<button class="zone-btn" name="zone" value="C3" style="top:230px; left:360px;">
-C3<br>{zone_display['C3']}
-</button>
-
-</form>
-</div>"""
-
-    st.markdown(html_map, unsafe_allow_html=True)
-
-    # 어떤 Zone이 눌렸는지 확인
-    params = st.experimental_get_query_params()
-    clicked_zone_param = params.get("zone", [None])[0]
-
-    if clicked_zone_param:
-        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{clicked_zone_param}"
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### 🔍 Zone 상세 보기")
