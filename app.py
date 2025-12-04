@@ -1844,19 +1844,51 @@ def render_tab_map():
         else:
             return "🟡"
 
-    st.markdown(f"#### {sel_floor} Zone별 현황 (통 개수 / 총 용량)")
+    # === 여기부터 새 코드: 사각형 도면 + 3x3 구역 버튼 ===
+    st.markdown(f"#### {sel_floor} 도면 (예시)")
 
+    # 바깥 사각형(도면 박스) 느낌용 HTML
+    st.markdown(
+        """
+        <div style="
+            width:520px;
+            height:320px;
+            border:2px solid #666;
+            border-radius:12px;
+            margin:auto;
+            padding:12px;
+            box-sizing:border-box;
+        ">
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")  # 여백
+
+    st.markdown("#### 구역 선택 (A1 ~ C3)")
+
+    # 3x3 그리드로 A1~C3 버튼 배치
     for row in ["A", "B", "C"]:
         cols = st.columns(3)
         for i, col in enumerate(cols):
             label = f"{row}{i+1}"
             info = zone_stats.get(label, {"drums": 0, "volume": 0})
-            txt = (
+
+            btn_text = (
                 f"{label} {badge(info['volume'])}\n"
                 f"{info['drums']}통 / {int(info['volume'])}kg"
             )
-            if col.button(txt, key=f"map_btn_{sel_floor}_{label}"):
-                st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
+
+            with col:
+                if st.button(
+                    btn_text,
+                    key=f"map_btn_{sel_floor}_{label}",
+                    use_container_width=True,
+                ):
+                    st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
+    # === 새 코드 끝 ===
+
 
     st.markdown("---")
     st.markdown("### 🔍 Zone 상세 보기")
