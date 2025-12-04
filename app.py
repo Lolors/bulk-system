@@ -1888,44 +1888,47 @@ def render_tab_map():
         zone_display[label] = f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
 
     # HTML 도면 + 버튼 (위치는 적당히 조정 가능)
-    html_map = f"""
-    <div class="map-box">
-      <form>
-        <!-- A row -->
-        <button class="zone-btn" name="zone" value="A1" style="top: 30px; left: 40px;">
-            A1<br>{zone_display['A1']}
-        </button>
-        <button class="zone-btn" name="zone" value="A2" style="top: 30px; left: 200px;">
-            A2<br>{zone_display['A2']}
-        </button>
-        <button class="zone-btn" name="zone" value="A3" style="top: 30px; left: 360px;">
-            A3<br>{zone_display['A3']}
-        </button>
+    html_map = f"""<div class="map-box">
+<form method="get">
 
-        <!-- B row -->
-        <button class="zone-btn" name="zone" value="B1" style="top: 130px; left: 40px;">
-            B1<br>{zone_display['B1']}
-        </button>
-        <button class="zone-btn" name="zone" value="B2" style="top: 130px; left: 200px;">
-            B2<br>{zone_display['B2']}
-        </button>
-        <button class="zone-btn" name="zone" value="B3" style="top: 130px; left: 360px;">
-            B3<br>{zone_display['B3']}
-        </button>
+<button class="zone-btn" name="zone" value="A1" style="top:30px; left:40px;">
+A1<br>{zone_display['A1']}
+</button>
 
-        <!-- C row -->
-        <button class="zone-btn" name="zone" value="C1" style="top: 230px; left: 40px;">
-            C1<br>{zone_display['C1']}
-        </button>
-        <button class="zone-btn" name="zone" value="C2" style="top: 230px; left: 200px;">
-            C2<br>{zone_display['C2']}
-        </button>
-        <button class="zone-btn" name="zone" value="C3" style="top: 230px; left: 360px;">
-            C3<br>{zone_display['C3']}
-        </button>
-      </form>
-    </div>
-    """
+<button class="zone-btn" name="zone" value="A2" style="top:30px; left:200px;">
+A2<br>{zone_display['A2']}
+</button>
+
+<button class="zone-btn" name="zone" value="A3" style="top:30px; left:360px;">
+A3<br>{zone_display['A3']}
+</button>
+
+<button class="zone-btn" name="zone" value="B1" style="top:130px; left:40px;">
+B1<br>{zone_display['B1']}
+</button>
+
+<button class="zone-btn" name="zone" value="B2" style="top:130px; left:200px;">
+B2<br>{zone_display['B2']}
+</button>
+
+<button class="zone-btn" name="zone" value="B3" style="top:130px; left:360px;">
+B3<br>{zone_display['B3']}
+</button>
+
+<button class="zone-btn" name="zone" value="C1" style="top:230px; left:40px;">
+C1<br>{zone_display['C1']}
+</button>
+
+<button class="zone-btn" name="zone" value="C2" style="top:230px; left:200px;">
+C2<br>{zone_display['C2']}
+</button>
+
+<button class="zone-btn" name="zone" value="C3" style="top:230px; left:360px;">
+C3<br>{zone_display['C3']}
+</button>
+
+</form>
+</div>"""
 
     st.markdown(html_map, unsafe_allow_html=True)
 
