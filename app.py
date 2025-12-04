@@ -860,16 +860,23 @@ def get_stock_summary(item_code: str, lot: str):
 # 탭 1: 이동
 # ==============================
 def clear_move_inputs():
-    """조회/초기화 입력값 및 상태 초기화."""
+    """이동 탭 입력값 초기화 콜백."""
     ss = st.session_state
-    ss["mv_barcode"] = ""
-    ss["mv_lot"] = ""
-    ss["mv_last_lot"] = ""
-    ss["mv_last_barcode"] = ""
-    ss["mv_searched_csv"] = False
-    ss["mv_search_by_lot"] = False
-    ss["mv_show_stock_detail"] = False
-    ss["mv_show_move_history_here"] = False
+
+    # 텍스트 입력/검색 관련 키들 제거
+    for k in [
+        "mv_barcode",
+        "mv_lot",
+        "mv_last_lot",
+        "mv_last_barcode",
+        "mv_search_by_lot",
+        "mv_searched_csv",
+        "mv_show_stock_detail",
+        "mv_show_move_history_here",
+        "clicked_zone_csv",
+    ]:
+        if k in ss:
+            del ss[k]
 
 
 def render_tab_move():
