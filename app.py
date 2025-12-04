@@ -1072,17 +1072,18 @@ def render_login():
     login_id = st.text_input("ID", key="login_id")
     login_pw = st.text_input("비밀번호", type="password", key="login_pw")
 
-    if st.button("로그인", key="login_btn"):
+    # 엔터로 로그인 가능하도록 처리
+    if login_id and login_pw:
         user = USER_ACCOUNTS.get((login_id or "").strip())
         if user and login_pw == user["password"]:
             ss["user_id"] = (login_id or "").strip()
             ss["user_name"] = user["display_name"]
             st.success(f"{user['display_name']}님, 환영합니다.")
             st.rerun()
+
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
-
-
+            
 # ==============================
 # (생략됐던) get_stock_summary 더미 정의
 # ==============================
