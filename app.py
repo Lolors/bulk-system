@@ -1270,7 +1270,6 @@ def render_tab_move():
 
     # ===================== 검색 후 로직 =====================
     df = load_drums()
-    df["lot_lower"] = df["로트번호"].astype(str).str.lower()
     prod_df = load_production()
     recv_df = load_receive()
 
@@ -1290,13 +1289,6 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
         barcode_used = lot
-
-        # 🔽 여기 추가! (대소문자 구분 없이 검색)
-        lot_lower = lot.lower()
-        
-        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
-
-    
     else:
         barcode_query = (ss.get("mv_last_barcode") or "").strip()
         if not barcode_query:
@@ -1398,7 +1390,7 @@ def render_tab_move():
         barcode_used = barcode_query
 
     df = load_drums()
-    lot_df = df[df["lot_lower"] == lot_lower].copy()
+    lot_df = df[df["로트번호"].astype(str) == lot].copy()
     if lot_df.empty:
         st.warning("CSV에서 해당 로트번호의 통 정보를 찾을 수 없습니다.")
         ss["mv_searched_csv"] = False
