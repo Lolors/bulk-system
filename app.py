@@ -4,11 +4,7 @@ import os
 from datetime import datetime, date
 import io
 import math
-import tempfile
-from google.cloud import vision
-from google.oauth2 import service_account
-import re
-import hashlib
+import boto3
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -50,8 +46,6 @@ STOCK_FILE = "stock.xlsx"              # 전산 재고
 # ==============================
 # S3 연동 설정
 # ==============================
-import boto3
-
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "bulk-system-enc")
 S3_PREFIX = os.getenv("S3_PREFIX", "bulk-app/")  # 폴더 경로
 
@@ -118,243 +112,6 @@ def s3_download_bytes(filename: str):
         return resp["Body"].read()
     except Exception:
         return None
-
-
-# ==============================
-# 바코드 인식 (Dynamsoft DBR 전용 - CaptureVisionRouter 사용)
-# ==============================
-try:
-    from PIL import Image, ImageOps, ImageEnhance
-except ImportError:
-    Image = None
-    ImageOps = None
-    ImageEnhance = None
-
-# Dynamsoft Barcode Reader Python SDK (v10~)
-try:
-    from dynamsoft_barcode_reader_bundle import (
-        LicenseManager,
-        CaptureVisionRouter,
-        EnumPresetTemplate,
-        EnumErrorCode,
-    )
-except ImportError:
-    LicenseManager = None
-    CaptureVisionRouter = None
-    EnumPresetTemplate = None
-    EnumErrorCode = None
-
-
-def load_dbr_license():
-    """
-    DBR 라이선스 키 로드:
-    1) st.secrets["DBR_LICENSE"]
-    2) 환경변수 DBR_LICENSE
-    """
-    lic = ""
-    try:
-        lic = st.secrets.get("DBR_LICENSE", "")
-    except Exception:
-        lic = ""
-    if not lic:
-        lic = os.getenv("DBR_LICENSE", "")
-    if not lic:
-        st.warning("DBR 라이선스 키를 찾을 수 없습니다. st.secrets 또는 환경변수 DBR_LICENSE에 등록해 주세요.")
-    return lic
-
-
-DBR_LICENSE = load_dbr_license()
-
-_DBR_CVR = None
-_DBR_LICENSE_INIT = False
-
-
-def get_dbr_router():
-    """LicenseManager + CaptureVisionRouter 초기화해서 전역으로 재사용."""
-    global _DBR_CVR, _DBR_LICENSE_INIT
-
-    if CaptureVisionRouter is None or LicenseManager is None or EnumErrorCode is None:
-        return None
-
-    if not _DBR_LICENSE_INIT:
-        try:
-            err_code, err_str = LicenseManager.init_license(DBR_LICENSE)
-        except Exception:
-            return None
-
-        if err_code not in (
-            EnumErrorCode.EC_OK,
-            getattr(EnumErrorCode, "EC_LICENSE_CACHE_USED", EnumErrorCode.EC_OK),
-            getattr(EnumErrorCode, "EC_LICENSE_WARNING", EnumErrorCode.EC_OK),
-        ):
-            return None
-
-        _DBR_LICENSE_INIT = True
-
-    if _DBR_CVR is None:
-        try:
-            _DBR_CVR = CaptureVisionRouter()
-        except Exception:
-            return None
-
-    return _DBR_CVR
-
-
-def preprocess_for_barcode(pil_img):
-    """
-    흐릿한 라벨용 전처리.
-    - 원본 비율 유지
-    - 너무 작은 이미지는 확대
-    """
-    if Image is None:
-        return pil_img
-
-    img = pil_img.copy()
-
-    # 너무 작은 이미지는 확대
-    min_side = min(img.size)
-    if min_side < 800:
-        scale = 800.0 / float(min_side)
-        new_size = (int(img.width * scale), int(img.height * scale))
-        img = img.resize(new_size, Image.LANCZOS)
-
-    return img
-
-
-def dbr_decode(pil_img):
-    """
-    Dynamsoft DBR(CaptureVisionRouter)로 바코드 디코딩.
-    - PIL 이미지를 임시 파일로 저장
-    - 파일 경로를 capture()에 넘겨서 공식 샘플 방식 그대로 사용
-    - 성공하면 [(포맷, 텍스트), ...] 리스트를 반환
-    """
-    cvr = get_dbr_router()
-    if cvr is None or EnumPresetTemplate is None or EnumErrorCode is None:
-        return []
-
-    # 전처리: 크기만 최소 800px 맞춰줌 (너무 작으면 확대)
-    img = pil_img.copy()
-    if Image is not None:
-        min_side = min(img.size)
-        if min_side < 800:
-            scale = 800.0 / float(min_side)
-            new_size = (int(img.width * scale), int(img.height * scale))
-            img = img.resize(new_size, Image.LANCZOS)
-
-    # 1) 임시 파일에 저장 (PNG)
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp_path = tmp.name
-            img.save(tmp_path, format="PNG")
-
-        # 2) 공식 샘플 방식: 파일 경로 + EnumPresetTemplate.value 사용
-        result = cvr.capture(tmp_path, EnumPresetTemplate.PT_READ_BARCODES.value)
-
-        # 3) 에러 코드 체크
-        err_code = result.get_error_code()
-        if err_code not in (
-            EnumErrorCode.EC_OK,
-            getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
-        ):
-            return []
-
-        barcode_result = result.get_decoded_barcodes_result()
-        if barcode_result is None or barcode_result.get_items() == 0:
-            return []
-
-        items = barcode_result.get_items()
-        codes = []
-        for item in items:
-            try:
-                text = (item.get_text() or "").strip()
-                fmt = (item.get_format_string() or "").strip()
-            except Exception:
-                text, fmt = "", ""
-            if text:
-                codes.append((fmt, text))
-
-        return codes
-
-    except Exception:
-        return []
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-
-
-# ==============================
-# Google Cloud Vision OCR
-# ==============================
-_VISION_CLIENT = None
-
-
-def get_vision_client():
-    """st.secrets에 저장된 서비스 계정 정보를 이용해 Vision 클라이언트 생성."""
-    global _VISION_CLIENT
-    if _VISION_CLIENT is not None:
-        return _VISION_CLIENT
-
-    info = st.secrets.get("gcp_service_account", None)
-    if not info:
-        st.warning("gcp_service_account 시크릿을 찾을 수 없습니다.")
-        return None
-
-    creds = service_account.Credentials.from_service_account_info(dict(info))
-    _VISION_CLIENT = vision.ImageAnnotatorClient(credentials=creds)
-    return _VISION_CLIENT
-
-
-def gcv_ocr_full_text(pil_img):
-    """이미지 전체 텍스트를 Google Cloud Vision으로 OCR."""
-    client = get_vision_client()
-    if client is None:
-        return ""
-
-    buf = io.BytesIO()
-    pil_img.save(buf, format="PNG")
-    content = buf.getvalue()
-
-    image = vision.Image(content=content)
-
-    try:
-        response = client.text_detection(image=image)
-    except Exception as e:
-        st.error(f"Google Vision 호출 중 오류: {e}")
-        return ""
-
-    if response.error.message:
-        st.error(f"Google Vision 에러: {response.error.message}")
-        return ""
-
-    texts = response.text_annotations
-    if not texts:
-        return ""
-
-    # 첫 번째 항목이 전체 텍스트
-    return texts[0].description.strip()
-
-
-def extract_barcode_like_code(text: str) -> str:
-    """
-    OCR 결과에서 바코드 밑 코드처럼 생긴 문자열만 뽑아낸다.
-    예: H20240221-0010 형태 (알파벳 1자 + 숫자8 + '-' + 숫자4)
-    """
-    if not text:
-        return ""
-
-    compact = text.replace(" ", "").replace("\n", "")
-    m = re.search(r"[A-Z]\d{8}-\d{4}", compact)
-    if m:
-        return m.group(0)
-
-    # 패턴이 확실치 않으면, 숫자/하이픈 많이 섞인 덩어리 중 하나라도 반환
-    m2 = re.search(r"[A-Z0-9\-]{8,}", compact)
-    return m2.group(0) if m2 else ""
 
 
 # ==============================
@@ -1009,13 +766,6 @@ def render_file_loader():
         if move_bytes is not None:
             s3_upload_bytes(MOVE_LOG_CSV, move_bytes)
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.caption(last_upload_caption(CSV_PATH))
-        st.caption(last_upload_caption(PRODUCTION_FILE))
-        st.caption(last_upload_caption(RECEIVE_FILE))
-        st.caption(last_upload_caption(STOCK_FILE))
-        st.caption(last_upload_caption(MOVE_LOG_CSV))
-
         # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
         try:
             _load_drums_core.clear()
@@ -1101,19 +851,22 @@ def get_stock_summary(item_code: str, lot: str):
 # 탭 1: 이동
 # ==============================
 def clear_move_inputs():
-    """조회/초기화 버튼 옆에서 사용할 입력값 초기화 콜백."""
+    """조회/초기화 입력값 및 상태 초기화."""
     ss = st.session_state
     ss["mv_barcode"] = ""
     ss["mv_lot"] = ""
-    ss["mv_scanned_barcode"] = ""
-    ss.pop("mv_last_scan_hash", None)   # 🔹 이미지 해시도 초기화
+    ss["mv_last_lot"] = ""
+    ss["mv_last_barcode"] = ""
+    ss["mv_searched_csv"] = False
+    ss["mv_search_by_lot"] = False
+    ss["mv_show_stock_detail"] = False
+    ss["mv_show_move_history_here"] = False
 
 
 def render_tab_move():
     st.markdown("### 📦 벌크 이동")
 
     ss = st.session_state
-    ss.setdefault("mv_scanned_barcode", "")
     ss.setdefault("mv_searched_csv", False)
     ss.setdefault("mv_search_by_lot", False)
     ss.setdefault("mv_last_lot", "")
@@ -1129,124 +882,51 @@ def render_tab_move():
     )
     barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-    # ================== 상단 입력 ==================
+    # ================== 입력 + 조회/초기화: form으로 묶어서 엔터=조회 ==================
+    with st.form("mv_search_form"):
+        col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
 
-    # 1줄: 작업번호/입하번호 + 로트번호 (기존 그대로)
-    col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
+        with col_in1:
+            barcode = st.text_input(
+                barcode_label,
+                key="mv_barcode",
+                placeholder="예: W24012345",
+            )
 
-    with col_in1:
-        barcode = st.text_input(
-            barcode_label,
-            key="mv_barcode",
-            placeholder="예: W24012345",
-        )
+        with col_in2:
+            lot_input = st.text_input(
+                "로트번호",
+                key="mv_lot",
+                placeholder="예: 2E075K",
+            )
 
-    with col_in2:
-        lot_input = st.text_input(
-            "로트번호",
-            key="mv_lot",
-            placeholder="예: 2E075K",
-        )
+        st.write("")
+        btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
+        with btn_col1:
+            search_clicked = st.form_submit_button("조회하기")
+        with btn_col2:
+            clear_clicked = st.form_submit_button("초기화")
 
-    # ================== 바코드 스캔 업로드 ==================
-    st.write("")
+    if clear_clicked:
+        clear_move_inputs()
+        return
 
-    scan_col, _ = st.columns([1.2, 3])
-
-    with scan_col:
-        st.caption("📷 라벨 사진 업로드")
-
-        scan_file = st.file_uploader(
-            "바코드 이미지 업로드",
-            type=["png", "jpg", "jpeg"],
-            key="mv_barcode_image",
-        )
-
-        image_bytes = None
-        image_name = None
-
-        if scan_file is not None:
-            image_bytes = scan_file.read()
-            image_name = scan_file.name
-
-        # ================== DBR + Vision 디코딩 (이미지당 1번만) ==================
-        if image_bytes is not None:
-            # 현재 이미지의 해시 계산
-            img_hash = hashlib.md5(image_bytes).hexdigest()
-            prev_hash = ss.get("mv_last_scan_hash")
-
-            # 새로운 이미지일 때만 인식 수행
-            if img_hash != prev_hash:
-                ss["mv_last_scan_hash"] = img_hash
-
-                try:
-                    img_raw = Image.open(io.BytesIO(image_bytes))
-
-                    img_display = img_raw.copy()
-                    st.image(img_display, caption=image_name, width=220)
-
-                    # 1차: DBR
-                    codes = dbr_decode(img_raw)
-                    text_code = ""
-
-                    if codes:
-                        _, text_code = codes[0]
-                        text_code = text_code.strip()
-
-                    # 2차: DBR 실패하면 Vision OCR
-                    if not text_code:
-                        full_text = gcv_ocr_full_text(img_raw)
-                        ocr_code = extract_barcode_like_code(full_text)
-                        text_code = ocr_code.strip()
-
-                    if text_code:
-                        ss["mv_scanned_barcode"] = text_code
-                        st.success(f"인식됨: {text_code}")
-                    else:
-                        st.warning("바코드를 인식하지 못했습니다.")
-
-                except Exception as e:
-                    st.error(f"이미지를 처리하는 중 오류 발생: {e}")
-
-            else:
-                # 같은 이미지는 이미 인식 끝난 상태
-                if ss.get("mv_scanned_barcode"):
-                    st.info(f"이미 인식된 바코드: {ss['mv_scanned_barcode']}")
-
-    # ================== 3줄: 조회 / 초기화 버튼 ==================
-    st.write("")
-    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
-
-    search_clicked = False
-    with btn_col1:
-        if st.button("조회하기", key="mv_search_btn_csv"):
-            search_clicked = True
-
-    with btn_col2:
-        st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
-
-    # 조회 버튼 처리
-    if "search_clicked" in locals() and search_clicked:
+    # 조회 버튼 또는 엔터(submit) 처리
+    if search_clicked:
         barcode_val = (barcode or "").strip()
         lot_val = (lot_input or "").strip()
-        scanned_val = ss.get("mv_scanned_barcode", "").strip()
 
-        if not lot_val and not barcode_val and not scanned_val:
-            st.warning("먼저 작업번호/입하번호 또는 로트번호를 입력(또는 바코드를 스캔)해 주세요.")
+        if not lot_val and not barcode_val:
+            st.warning("먼저 작업번호/입하번호 또는 로트번호를 입력해 주세요.")
             ss["mv_searched_csv"] = False
             return
 
         search_by_lot = bool(lot_val)
 
-        if not search_by_lot:
-            if not barcode_val and scanned_val:
-                barcode_val = scanned_val
-
         ss["mv_last_lot"] = lot_val
         ss["mv_last_barcode"] = barcode_val
         ss["mv_search_by_lot"] = search_by_lot
         ss["mv_searched_csv"] = True
-        ss["mv_scanned_barcode"] = ""
         ss["mv_show_move_history_here"] = False
 
     if not ss["mv_searched_csv"]:
@@ -1373,7 +1053,7 @@ def render_tab_move():
 
         barcode_used = barcode_query
 
-    # ---------- 여기서부터 LOT 기준으로 CSV 조회 (대소문자 무시) ----------
+    # ---------- LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
     lot_lower = str(lot).lower()
     lot_df = df[df["로트번호"].astype(str).str.lower() == lot_lower].copy()
@@ -1476,7 +1156,6 @@ def render_tab_move():
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
         with loc_col2:
             b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
-            # ✅ 항상 보이는 상세보기 버튼
             with b1_col:
                 if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
                     ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
@@ -1484,7 +1163,7 @@ def render_tab_move():
                 if st.button("이동이력", key=f"move_hist_btn_{lot}"):
                     ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
-        # ✅ 전산 재고 상세 토글
+        # 전산 재고 상세 토글
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
                 st.markdown("#### 🔎 전산 재고 상세")
@@ -1646,7 +1325,7 @@ def render_tab_lookup():
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
 
-    # ✅ 제조일자 기준 TAT(개월) 컬럼 추가
+    # 제조일자 기준 TAT(개월) 컬럼 추가
     df = add_tat_column(df)
 
     query = st.text_input("로트번호, 품목코드 또는 품명을 입력해 주세요.")
@@ -1661,10 +1340,9 @@ def render_tab_lookup():
     else:
         df_view = df
 
-    # 🔍 용량 0 포함 여부 (기본: 미포함)
+    # 용량 0 포함 여부 (기본: 미포함)
     include_zero = st.checkbox("용량 0 포함", value=False)
 
-    # 기본(default) 상태는 0 제외
     if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
 
@@ -1792,7 +1470,7 @@ def render_tab_map():
         st.write(f"**통 개수:** {drums}통")
         st.write(f"**총 용량:** {int(vol)}kg")
 
-        st.markdown("---")
+        st.mark다운("---")
         st.markdown("### 🔍 상세 목록")
 
         show_cols = [
@@ -1910,7 +1588,6 @@ def render_tab_move_log():
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_page", 1)
 
-    # ▶ 검색 초기화 콜백
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
@@ -1925,7 +1602,6 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # 필터 적용 (부분 일치, 대소문자 무시 X – 이전과 동일)
     if lot_filter:
         mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
         df_view = df[mask].copy()
@@ -1936,10 +1612,8 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
-    # 시간 내림차순 정렬
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # --- 페이지네이션 ---
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
@@ -1960,7 +1634,6 @@ def render_tab_move_log():
     end = start + page_size
     page_df = df_view.iloc[start:end].copy()
 
-    # 표시/편집할 컬럼 + 삭제 체크박스 컬럼 추가
     cols_order = [
         "시간",
         "ID",
@@ -1988,14 +1661,13 @@ def render_tab_move_log():
     edited_page = st.data_editor(
         page_df,
         use_container_width=True,
-        disabled=["시간", "ID"],   # 이 두 컬럼은 수정 불가
+        disabled=["시간", "ID"],
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="삭제할 행에 체크"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
 
-    # 공통 저장 함수
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
         df_updated.to_csv(buf, index=False, encoding="utf-8-sig")
@@ -2006,17 +1678,14 @@ def render_tab_move_log():
             df_updated.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
         except Exception:
             pass
-        # S3에도 저장
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
     col_save, col_delete = st.columns(2)
 
-    # ✅ 내용 수정 저장
     with col_save:
         if st.button("변경 내용 저장", key="log_save_changes"):
             try:
                 df_updated = df.copy()
-
                 if delete_col in edited_page.columns:
                     edited_for_update = edited_page.drop(columns=[delete_col])
                 else:
@@ -2028,7 +1697,6 @@ def render_tab_move_log():
             except Exception as e:
                 st.error(f"변경 내용을 저장하는 중 오류가 발생했습니다: {e}")
 
-    # 🗑 선택 행 삭제
     with col_delete:
         if st.button("선택 행 삭제", key="log_delete_rows"):
             try:
@@ -2049,7 +1717,7 @@ def render_tab_move_log():
 
 
 # ==============================
-# 탭 5: 데이터 파일 관리 (메인 탭 중 데이터 탭)
+# 탭 5: 데이터 파일 관리
 # ==============================
 def file_status(sess_key: str, path: str) -> str:
     ss = st.session_state
@@ -2076,7 +1744,6 @@ def render_tab_data():
             type=["csv"],
             key="data_up_bulk",
         )
-        # 🔽 실제 파일 수정 시간 기준 캡션
         st.caption(last_upload_caption(CSV_PATH))
 
         if st.button("이 파일로 bulk CSV 교체", key="apply_bulk"):
@@ -2091,7 +1758,6 @@ def render_tab_data():
                     df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
-                # 🔹 S3 업로드
                 s3_upload_bytes(CSV_PATH, data)
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
@@ -2214,7 +1880,6 @@ def has_data(sess_key: str, path: str) -> bool:
         return True
     if os.path.exists(path):
         return True
-    # 마지막으로 S3 확인
     b = s3_download_bytes(path)
     if b is not None:
         return True
@@ -2237,13 +1902,11 @@ def main():
         and has_data("stock_xlsx_bytes", STOCK_FILE)
     )
 
-    # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
     if not ss.get("data_initialized", False) and not files_ready:
-        # 🔹 간이 업로드 말고, 우리가 만든 정식 업로드 화면 호출
         render_file_loader()
         return
 
-    # 3) 사이드바: 사용자 정보 + 로그아웃 + (선택) CSV 다운로드 버튼
+    # 3) 사이드바
     with st.sidebar:
         st.markdown(f"**사용자:** {ss['user_name']} ({ss['user_id']})")
         if st.button("로그아웃", key="logout_btn"):
@@ -2252,7 +1915,6 @@ def main():
                     del st.session_state[k]
             st.rerun()
 
-        # 현재 세션의 bulk/move_log를 다운로드할 수 있게
         if "bulk_csv_bytes" in ss:
             st.download_button(
                 "현재 bulk CSV 다운로드",
