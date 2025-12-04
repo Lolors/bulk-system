@@ -22,25 +22,36 @@ USER_ACCOUNTS = {
 # =======
 # 지도용 박스 스타일 (한 번만 선언)
 # ======
-
 if "map_css_loaded" not in st.session_state:
     st.markdown("""
     <style>
     .map-box {
+        position: relative;
         border: 2px solid #666;
         border-radius: 12px;
         width: 520px;
         height: 320px;
-        margin: auto;
-        padding: 16px;
+        margin: 0 auto 20px auto;
         box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
+    }
+    .zone-btn {
+        position: absolute;
+        width: 120px;
+        height: 70px;
+        border-radius: 12px;
+        border: 1px solid #ddd;
+        background: #ffffff;
+        font-size: 12px;
+        cursor: pointer;
+        padding: 4px;
+    }
+    .zone-btn:hover {
+        background: #f5f5f5;
     }
     </style>
     """, unsafe_allow_html=True)
     st.session_state["map_css_loaded"] = True
+
 
 # ==============================
 # 기본 설정 + CSS
@@ -1867,35 +1878,64 @@ def render_tab_map():
         else:
             return "🟡"
 
-    # === 새 도면 + 3×3 구역 버튼 (박스 안에) ===
+    # === 도면 + HTML 버튼 9개 (A1~C3) ===
     st.markdown(f"#### {sel_floor} 도면 (예시)")
 
-    with st.container():
-        # 박스 시작
-        st.markdown('<div class="map-box">', unsafe_allow_html=True)
+    # 각 Zone별 텍스트 생성
+    zone_display = {}
+    for label in labels_all:
+        info = zone_stats.get(label, {"drums": 0, "volume": 0})
+        zone_display[label] = f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
 
-        # 3×3 그리드 (A1~C3)
-        for row in ["A", "B", "C"]:
-            cols = st.columns(3)
-            for i, col in enumerate(cols):
-                label = f"{row}{i+1}"
-                info = zone_stats.get(label, {"drums": 0, "volume": 0})
+    # HTML 도면 + 버튼 (위치는 적당히 조정 가능)
+    html_map = f"""
+    <div class="map-box">
+      <form>
+        <!-- A row -->
+        <button class="zone-btn" name="zone" value="A1" style="top: 30px; left: 40px;">
+            A1<br>{zone_display['A1']}
+        </button>
+        <button class="zone-btn" name="zone" value="A2" style="top: 30px; left: 200px;">
+            A2<br>{zone_display['A2']}
+        </button>
+        <button class="zone-btn" name="zone" value="A3" style="top: 30px; left: 360px;">
+            A3<br>{zone_display['A3']}
+        </button>
 
-                btn_text = (
-                    f"{label} {badge(info['volume'])}  "
-                    f"{info['drums']}통 / {int(info['volume'])}kg"
-                )
+        <!-- B row -->
+        <button class="zone-btn" name="zone" value="B1" style="top: 130px; left: 40px;">
+            B1<br>{zone_display['B1']}
+        </button>
+        <button class="zone-btn" name="zone" value="B2" style="top: 130px; left: 200px;">
+            B2<br>{zone_display['B2']}
+        </button>
+        <button class="zone-btn" name="zone" value="B3" style="top: 130px; left: 360px;">
+            B3<br>{zone_display['B3']}
+        </button>
 
-                with col:
-                    if st.button(
-                        btn_text,
-                        key=f"map_btn_{sel_floor}_{label}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
+        <!-- C row -->
+        <button class="zone-btn" name="zone" value="C1" style="top: 230px; left: 40px;">
+            C1<br>{zone_display['C1']}
+        </button>
+        <button class="zone-btn" name="zone" value="C2" style="top: 230px; left: 200px;">
+            C2<br>{zone_display['C2']}
+        </button>
+        <button class="zone-btn" name="zone" value="C3" style="top: 230px; left: 360px;">
+            C3<br>{zone_display['C3']}
+        </button>
+      </form>
+    </div>
+    """
 
-        # 박스 끝
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(html_map, unsafe_allow_html=True)
+
+    # 어떤 Zone 버튼이 눌렸는지 확인 (쿼리 파라미터 사용)
+    params = st.experimental_get_query_params()
+    clicked_zone_param = params.get("zone", [None])[0]
+
+    if clicked_zone_param:
+        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{clicked_zone_param}"
+
 
 
     st.markdown("---")
