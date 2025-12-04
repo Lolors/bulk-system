@@ -32,10 +32,19 @@ st.markdown(
         max-width: 160px !important;
         min-width: 160px !important;
     }
+
+    /* 🔹 st.form 테두리/배경 제거 */
+    .stForm {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        background-color: transparent !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
