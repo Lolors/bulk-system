@@ -1883,11 +1883,11 @@ def render_tab_map():
 
     # 각 Zone별 텍스트 생성
     zone_display = {}
-    for label in labels_all:
+    for label in labels_all:  # labels_all = ["A1","A2",...,"C3"]
         info = zone_stats.get(label, {"drums": 0, "volume": 0})
         zone_display[label] = f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
 
-    # HTML 도면 + 버튼 (위치는 적당히 조정 가능)
+    # HTML 도면 + 버튼 (절대 좌표로 3x3 정렬)
     html_map = f"""<div class="map-box">
 <form method="get">
 
@@ -1932,14 +1932,12 @@ C3<br>{zone_display['C3']}
 
     st.markdown(html_map, unsafe_allow_html=True)
 
-    # 어떤 Zone 버튼이 눌렸는지 확인 (쿼리 파라미터 사용)
+    # 어떤 Zone이 눌렸는지 확인
     params = st.experimental_get_query_params()
     clicked_zone_param = params.get("zone", [None])[0]
 
     if clicked_zone_param:
         st.session_state["clicked_zone_csv"] = f"{sel_floor}-{clicked_zone_param}"
-
-
 
     st.markdown("---")
     st.markdown("### 🔍 Zone 상세 보기")
