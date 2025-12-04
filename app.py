@@ -19,23 +19,6 @@ USER_ACCOUNTS = {
     "hn": {"password": "0000", "display_name": "김한나"},
 }
 
-# =======
-# 지도용 박스 스타일 (한 번만 선언)
-# ======
-if "map_css_loaded" not in st.session_state:
-    st.markdown("""
-    <style>
-    .map-box {
-        border: 2px solid #666;
-        border-radius: 12px;
-        margin: 0 auto 20px auto;
-        padding: 16px;
-        box-sizing: border-box;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    st.session_state["map_css_loaded"] = True
-
 # ==============================
 # 기본 설정 + CSS
 # ==============================
@@ -1100,7 +1083,8 @@ def render_login():
 
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
-            
+
+
 # ==============================
 # (생략됐던) get_stock_summary 더미 정의
 # ==============================
@@ -1389,8 +1373,11 @@ def render_tab_move():
 
         barcode_used = barcode_query
 
+    # ---------- 여기서부터 LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
-    lot_df = df[df["로트번호"].astype(str) == lot].copy()
+    lot_lower = str(lot).lower()
+    lot_df = df[df["로트번호"].astype(str).str.lower() == lot_lower].copy()
+
     if lot_df.empty:
         st.warning("CSV에서 해당 로트번호의 통 정보를 찾을 수 없습니다.")
         ss["mv_searched_csv"] = False
@@ -1596,7 +1583,7 @@ def render_tab_move():
                 return
 
             df_all = load_drums()
-            lot_mask = df_all["로트번호"].astype(str) == lot
+            lot_mask = df_all["로트번호"].astype(str).str.lower() == lot_lower
 
             drum_logs = []
 
@@ -1639,7 +1626,7 @@ def render_tab_move():
         if log_df.empty:
             st.info("이동 이력이 없습니다.")
         else:
-            sub = log_df[log_df["로트번호"].astype(str) == str(lot)].copy()
+            sub = log_df[log_df["로트번호"].astype(str).str.lower() == lot_lower].copy()
             if sub.empty:
                 st.info("해당 로트번호의 이동 이력이 없습니다.")
             else:
@@ -1752,7 +1739,7 @@ def render_tab_lookup():
 
 
 # ==============================
-# 탭 3: 지도
+# 탭 3: 지도 (A1~C3 버튼)
 # ==============================
 def render_tab_map():
     st.markdown("### 🗺 벌크 위치 지도 (CSV 기준)")
@@ -1861,35 +1848,19 @@ def render_tab_map():
         else:
             return "🟡"
 
-    # === 도면 + 3×3 구역 버튼 (A1~C3) ===
-    st.markdown(f"#### {sel_floor} 도면 (예시)")
+    st.markdown(f"#### {sel_floor} Zone별 현황 (통 개수 / 총 용량)")
 
-    # 각 Zone별 텍스트 생성
-    zone_display = {}
-    for label in labels_all:  # ["A1","A2",...,"C3"]
-        info = zone_stats.get(label, {"drums": 0, "volume": 0})
-        zone_display[label] = (
-            f"{badge(info['volume'])} {info['drums']}통 / {int(info['volume'])}kg"
-        )
-
-    # 테두리 박스 안에 3×3 Streamlit 버튼 배치
-    with st.container():
-        st.markdown('<div class="map-box">', unsafe_allow_html=True)
-
-        for row in ["A", "B", "C"]:
-            cols = st.columns(3)
-            for i, col in enumerate(cols):
-                label = f"{row}{i+1}"  # A1~C3
-                text = f"{label}  {zone_display[label]}"
-                with col:
-                    if st.button(
-                        text,
-                        key=f"map_btn_{sel_floor}_{label}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
-
-        st.markdown('</div>', unsafe_allow_html=True)
+    for row in ["A", "B", "C"]:
+        cols = st.columns(3)
+        for i, col in enumerate(cols):
+            label = f"{row}{i+1}"
+            info = zone_stats.get(label, {"drums": 0, "volume": 0})
+            txt = (
+                f"{label} {badge(info['volume'])}\n"
+                f"{info['drums']}통 / {int(info['volume'])}kg"
+            )
+            if col.button(txt, key=f"map_btn_{sel_floor}_{label}"):
+                st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
 
     st.markdown("---")
     st.markdown("### 🔍 Zone 상세 보기")
@@ -1954,7 +1925,7 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # 필터 적용
+    # 필터 적용 (부분 일치, 대소문자 무시 X – 이전과 동일)
     if lot_filter:
         mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
         df_view = df[mask].copy()
