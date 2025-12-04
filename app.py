@@ -906,7 +906,7 @@ def render_tab_move():
             lot_input = st.text_input(
                 "로트번호",
                 key="mv_lot",
-                placeholder="예: 2E075K(소문자OK)",
+                placeholder="예: 2e075k",
             )
 
         st.write("")
