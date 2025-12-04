@@ -1270,6 +1270,7 @@ def render_tab_move():
 
     # ===================== 검색 후 로직 =====================
     df = load_drums()
+    df["lot_lower"] = df["로트번호"].astype(str).str.lower()
     prod_df = load_production()
     recv_df = load_receive()
 
