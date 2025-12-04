@@ -26,32 +26,15 @@ if "map_css_loaded" not in st.session_state:
     st.markdown("""
     <style>
     .map-box {
-        position: relative;
         border: 2px solid #666;
         border-radius: 12px;
-        width: 520px;
-        height: 320px;
         margin: 0 auto 20px auto;
+        padding: 16px;
         box-sizing: border-box;
-    }
-    .zone-btn {
-        position: absolute;
-        width: 120px;
-        height: 70px;
-        border-radius: 12px;
-        border: 1px solid #ddd;
-        background: #ffffff;
-        font-size: 12px;
-        cursor: pointer;
-        padding: 4px;
-    }
-    .zone-btn:hover {
-        background: #f5f5f5;
     }
     </style>
     """, unsafe_allow_html=True)
     st.session_state["map_css_loaded"] = True
-
 
 # ==============================
 # 기본 설정 + CSS
