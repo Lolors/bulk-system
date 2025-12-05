@@ -952,7 +952,9 @@ def get_stock_summary(item_code: str, lot: str):
         axis=1,
     )
 
-    detail_df = grouped[["대분류", "창고코드", "창고명", "실재고수량", "표시"]]
+    detail_df = grouped[["대분류", "창고코드", "창고명", "실재고수량"]].copy()
+    detail_df = detail_df.sort_values(["대분류", "창고코드"])
+
     summary_text = " / ".join(grouped["표시"].tolist())
 
     return detail_df, summary_text
@@ -1258,7 +1260,9 @@ def render_tab_move():
         stock_loc_display = stock_summary_text
     else:
         stock_loc_display = current_zone
-        
+    else:
+        stock_loc_display = current_zone
+
     col_left2, col_right2 = st.columns(2)
 
     # ===== 왼쪽: 조회 정보 + 통 선택 =====
@@ -1293,9 +1297,21 @@ def render_tab_move():
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
                 st.markdown("#### 🔎 전산 재고 상세")
-                st.dataframe(stock_summary_df, use_container_width=True, height=240)
+
+                # 행 수 기반 높이 자동 조정 (행당 약 35px + 헤더 40px)
+                n_rows = len(stock_summary_df)
+                row_h = 35
+                header_h = 40
+                height = header_h + row_h * (n_rows + 1)
+
+                st.dataframe(
+                    stock_summary_df,
+                    use_container_width=True,
+                    height=height
+                )
             else:
                 st.info("전산 재고 데이터가 없습니다.")
+
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
