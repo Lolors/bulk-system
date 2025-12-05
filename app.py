@@ -917,35 +917,38 @@ def clear_move_inputs():
             del ss[k]
 
 
-def render_tab_move():
-    st.markdown("### 📦 벌크 이동")
+# ================== 검색 입력 영역 ==================
+with st.form("move_search_form"):
+    bulk_type = st.radio(
+        "벌크 구분을 선택해 주세요.",
+        ["자사", "사급"],
+        horizontal=True,
+        key="mv_bulk_type_csv",
+    )
 
-    ss = st.session_state
+    barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-    # ================== 검색 폼 (엔터로도 조회) ==================
-    with st.form("move_search_form"):
-        bulk_type = st.radio(
-            "벌크 구분을 선택해 주세요.",
-            ["자사", "사급"],
-            horizontal=True,
-            key="mv_bulk_type_csv",
+    # 🔹 입력칸 너비 복구 (예전처럼)
+    col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
+    with col_in1:
+        barcode = st.text_input(
+            barcode_label,
+            key="mv_barcode",
+            placeholder="예: W24012345",
+        )
+    with col_in2:
+        lot_input = st.text_input(
+            "로트번호",
+            key="mv_lot",
+            placeholder="예: 2E075K",
         )
 
-        barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
-
-        col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
-        with col_in1:
-            barcode = st.text_input(
-                barcode_label,
-                key="mv_barcode",
-                placeholder="예: W24012345",
-            )
-        with col_in2:
-            lot_input = st.text_input(
-                "로트번호",
-                key="mv_lot",
-                placeholder="예: 2E075K",
-            )
+    # 🔹 버튼은 form 안에서 '레이아웃만' 잡고, submit 처리는 아래에서
+    col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
+    with col_b1:
+        form_submit = st.form_submit_button("조회하기", use_container_width=True)
+    with col_b2:
+        reset_clicked = st.form_submit_button("초기화", use_container_width=True)
 
         search_clicked = st.form_submit_button("조회하기")
 
