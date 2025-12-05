@@ -861,17 +861,7 @@ def render_login():
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
 
-# ==============================
-# (생략됐던) get_stock_summary 더미 정의
-# ==============================
-def get_stock_summary(item_code: str, lot: str):
-    """
-    원래 코드에 있던 get_stock_summary가 질문 코드에는 없어서
-    최소한의 더미로 넣어 둡니다.
-    실제 전산 재고 연동 로직이 있다면 이 부분을 교체해 주세요.
-    """
-    return None, ""
-
+stock.xlsx 기반 전산 재고 요약
 
 # ==============================
 # 탭 1: 이동 - 입력값 초기화
@@ -1167,9 +1157,12 @@ def render_tab_move():
         current_zone = "혼합"
 
     stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
-    if stock_summary_df is not None and not stock_summary_df.empty:
-        top = stock_summary_df.iloc[0]
-        stock_loc_display = f"{top['대분류']}({top['창고명']})"
+
+    if stock_summary_text:  # 요약 문자열 있으면 그걸 그대로 사용
+        # 예: "창고(부자재창고) 10kg / 외주(위드맘) 20kg"
+        stock_loc_display = stock_summary_text
+    else:
+        stock_loc_display = current_zone
     else:
         stock_loc_display = current_zone
 
