@@ -825,20 +825,18 @@ def render_file_loader():
 def render_login():
     ss = st.session_state
 
+    # 🔹 이전에 로그인했던 ID가 있으면 기본값으로 넣어주기
+    #    (단, 이번 세션에서 login_id가 아직 안 만들어졌을 때만)
+    if "last_login_id" in ss and "login_id" not in ss:
+        ss["login_id"] = ss["last_login_id"]
+
     st.title("🏭 벌크 관리 시스템 - 로그인")
     st.markdown("작업 전 ID와 비밀번호를 입력해 주세요.")
 
-    # ✅ form 사용: 엔터 → 로그인, 버튼 → 로그인
+    # ✅ form 사용: 엔터로도 로그인, 버튼으로도 로그인
     with st.form("login_form"):
         login_id = st.text_input("ID", key="login_id")
         login_pw = st.text_input("비밀번호", type="password", key="login_pw")
-
-        # 🔹 위젯용 key와 세션 저장용 key를 분리
-        remember = st.checkbox(
-            "로그인 상태 유지",
-            key="login_remember_checkbox",              # 위젯 키
-            value=ss.get("remember_me", False),         # 저장된 값 불러오기
-        )
 
         login_submitted = st.form_submit_button("로그인")
 
@@ -849,7 +847,14 @@ def render_login():
         if user and login_pw == user["password"]:
             ss["user_id"] = (login_id or "").strip()
             ss["user_name"] = user["display_name"]
-            ss["remember_me"] = bool(remember)          # ✅ 위젯키와 다른 세션 키에 저장
+
+            # 🔹 마지막에 성공적으로 로그인한 ID 기억
+            ss["last_login_id"] = (login_id or "").strip()
+
+            # 혹시 예전에 쓰던 로그인 유지 관련 키가 있다면 정리 (선택 사항)
+            for k in ["remember_me", "login_remember_checkbox"]:
+                if k in ss:
+                    del ss[k]
 
             st.success(f"{user['display_name']}님, 환영합니다.")
             st.rerun()
@@ -974,122 +979,136 @@ def render_tab_move():
     line = ""
     barcode_used = ""
 
-    if search_by_lot:
-        lot = (ss.get("mv_last_lot") or "").strip()
-        if not lot:
-            st.warning("로트번호가 비어 있습니다.")
+if search_by_lot:
+    # 원본 로트 (표시용)
+    lot_input = (ss.get("mv_last_lot") or "").strip()
+    if not lot_input:
+        st.warning("로트번호가 비어 있습니다.")
+        ss["mv_searched_csv"] = False
+        return
+
+    # 검색용은 소문자로 변환하여 대소문자 무시
+    lot_key = lot_input.lower()
+
+    lot = lot_input
+    barcode_used = lot_input
+
+else:
+    barcode_query = (ss.get("mv_last_barcode") or "").strip()
+    if not barcode_query:
+        st.warning("작업번호/입하번호가 비어 있습니다.")
+        ss["mv_searched_csv"] = False
+        return
+
+    if bulk_type == "자사":
+        if prod_df.empty:
+            st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
             ss["mv_searched_csv"] = False
             return
-        barcode_used = lot
-    else:
-        barcode_query = (ss.get("mv_last_barcode") or "").strip()
-        if not barcode_query:
-            st.warning("작업번호/입하번호가 비어 있습니다.")
+
+        hit = prod_df[prod_df["작업번호"].astype(str) == barcode_query]
+        if hit.empty:
+            st.warning("해당 작업번호를 찾을 수 없습니다.")
             ss["mv_searched_csv"] = False
             return
 
-        if bulk_type == "자사":
-            if prod_df.empty:
-                st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        r = hit.iloc[0]
+        lot = str(r["LOTNO"])
+        item_code = str(r["품번"])
+        item_name = str(r["품명"])
+        prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
+        prod_date = str(r["작업일자"])
+        line = classify_product_line(item_code)
 
-            hit = prod_df[prod_df["작업번호"].astype(str) == barcode_query]
-            if hit.empty:
-                st.warning("해당 작업번호를 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        df = ensure_lot_in_csv(
+            df,
+            lot=lot,
+            item_code=item_code,
+            item_name=item_name,
+            line=line,
+            mfg_date=prod_date,
+            initial_status="생산대기",
+            prod_qty=prod_qty
+        )
+        save_drums(df)
 
-            r = hit.iloc[0]
-            lot = str(r["LOTNO"])
-            item_code = str(r["품번"])
-            item_name = str(r["품명"])
-            prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
-            prod_date = str(r["작업일자"])
-            line = classify_product_line(item_code)
+    else:  # 사급
+        if recv_df.empty:
+            st.error("receive.xlsx 파일을 찾을 수 없습니다.")
+            ss["mv_searched_csv"] = False
+            return
 
-            df = ensure_lot_in_csv(
-                df,
-                lot=lot,
-                item_code=item_code,
-                item_name=item_name,
-                line=line,
-                mfg_date=prod_date,
-                initial_status="생산대기",
-                prod_qty=prod_qty,
-            )
-            save_drums(df)
+        if "입하번호" not in recv_df.columns:
+            st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
+            ss["mv_searched_csv"] = False
+            return
 
-        else:  # 사급
-            if recv_df.empty:
-                st.error("receive.xlsx 파일을 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        hit = recv_df[recv_df["입하번호"].astype(str) == barcode_query]
+        if hit.empty:
+            st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
+            ss["mv_searched_csv"] = False
+            return
 
-            if "입하번호" not in recv_df.columns:
-                st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        r = hit.iloc[0]
+        if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
+            st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
+            ss["mv_searched_csv"] = False
+            return
 
-            hit = recv_df[recv_df["입하번호"].astype(str) == barcode_query]
-            if hit.empty:
-                st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        item_code = str(r["품번"])
+        item_name = str(r["품명"])
+        lot = str(r["로트번호"])
 
-            r = hit.iloc[0]
-            if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
-                st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+        if "입하량" in recv_df.columns:
+            prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
+        else:
+            prod_qty = None
 
-            item_code = str(r["품번"])
-            item_name = str(r["품명"])
-            lot = str(r["로트번호"])
+        if "제조일자" in recv_df.columns:
+            prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
+        elif "제조년월일" in recv_df.columns:
+            prod_date = "" if pd.isna(r["제조년월일"]) else str(r["제조년월일"])
+        else:
+            prod_date = ""
 
-            if "입하량" in recv_df.columns:
-                prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
-            else:
-                prod_qty = None
+        trade_type = str(r.get("유/무상", "")).strip()
+        if trade_type == "유상":
+            line = "사급(유상)"
+        elif trade_type == "무상":
+            line = "사급(무상)"
+        else:
+            line = "사급"
 
-            if "제조일자" in recv_df.columns:
-                prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
-            elif "제조년월일" in recv_df.columns:
-                prod_date = "" if pd.isna(r["제조년월일"]) else str(r["제조년월일"])
-            else:
-                prod_date = ""
+        df = ensure_lot_in_csv(
+            df,
+            lot=lot,
+            item_code=item_code,
+            item_name=item_name,
+            line=line,
+            mfg_date=prod_date,
+            initial_status="생산대기",
+            prod_qty=prod_qty
+        )
+        save_drums(df)
 
-            trade_type = str(r.get("유/무상", "")).strip()
-            if trade_type == "유상":
-                line = "사급(유상)"
-            elif trade_type == "무상":
-                line = "사급(무상)"
-            else:
-                line = "사급"
+    barcode_used = barcode_query
 
-            df = ensure_lot_in_csv(
-                df,
-                lot=lot,
-                item_code=item_code,
-                item_name=item_name,
-                line=line,
-                mfg_date=prod_date,
-                initial_status="생산대기",
-                prod_qty=prod_qty,
-            )
-            save_drums(df)
-
-        barcode_used = barcode_query
 
     # ---------- LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
-    lot_lower = str(lot).lower()
-    lot_df = df[df["로트번호"].astype(str).str.lower() == lot_lower].copy()
+
+    if ss.get("mv_search_by_lot", False):
+        lot_key = (lot or "").lower()
+        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+        lot_df = df[df["lot_lower"] == lot_key].copy()
+    else:
+        lot_df = df[df["로트번호"].astype(str) == lot].copy()
 
     if lot_df.empty:
         st.warning("CSV에서 해당 로트번호의 통 정보를 찾을 수 없습니다.")
         ss["mv_searched_csv"] = False
         return
+
 
     combos = lot_df[["품목코드", "품명"]].drop_duplicates().reset_index(drop=True)
     if len(combos) == 1:
@@ -1631,7 +1650,12 @@ def render_tab_move_log():
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
     if lot_filter:
-        mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
+        q = lot_filter.strip().lower()
+
+        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+
+        mask = df["lot_lower"].str.contains(q, na=False)
+
         df_view = df[mask].copy()
     else:
         df_view = df.copy()
