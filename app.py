@@ -579,10 +579,8 @@ def write_move_log(
 ):
     """
     이동 이력을 bulk_move_log.csv에 기록.
-
-    drum_infos: 리스트 형태
-        [(통번호, moved_qty, old_qty, new_qty), ...]
-        moved_qty 는 "변화량 = 변경 전 - 변경 후" 값.
+    drum_infos: [(통번호, moved_qty, old_qty, new_qty), ...]
+        moved_qty 는 '변경 후 용량 - 변경 전 용량' (보통 음수, 사용량)
     """
     if not drum_infos:
         return
@@ -590,30 +588,9 @@ def write_move_log(
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    # 1) 새로 추가할 로그 행 만들기
+    # 새로 추가할 로그 행 만들기
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    rows = []
-    for drum_no, moved_qty, old_qty, new_qty in drum_infos:
-        rows.append(
-            {
-                "시간": ts,
-                "ID": user_display_name,
-                "품번": item_code,
-                "품명": item_name,
-                "로트번호": lot,
-                "통번호": drum_no,
-                "변경 전 용량": old_qty,
-                "변경 후 용량": new_qty,
-                "변화량": moved_qty,      # ✅ old - new (양수면 줄어든 양)
-                "변경 전 위치": from_zone,
-                "변경 후 위치": to_zone,
-            }
-        )
-
-    new_df = pd.DataFrame(rows)
-
-    # 2) 기존 로그 불러오기 (세션 → 로컬 → S3 순)
     default_cols = [
         "시간",
         "ID",
@@ -628,61 +605,63 @@ def write_move_log(
         "변경 후 위치",
     ]
 
-    def _load_existing_log():
-        # 세션에 있으면 우선 사용
-        if "move_log_csv_bytes" in ss:
-            try:
-                return pd.read_csv(io.BytesIO(ss["move_log_csv_bytes"]))
-            except Exception:
-                return pd.DataFrame(columns=default_cols)
+    rows = []
+    for drum_no, moved_qty, old_qty, new_qty in drum_infos:
+        rows.append(
+            {
+                "시간": ts,
+                "ID": user_display_name,
+                "품번": item_code,
+                "품명": item_name,
+                "로트번호": lot,
+                "통번호": drum_no,
+                "변경 전 용량": old_qty,
+                "변경 후 용량": new_qty,
+                "변화량": moved_qty,  # ✅ new - old (대부분 음수)
+                "변경 전 위치": from_zone,
+                "변경 후 위치": to_zone,
+            }
+        )
 
-        # 로컬 파일
-        if os.path.exists(MOVE_LOG_CSV):
-            try:
-                return pd.read_csv(MOVE_LOG_CSV)
-            except Exception:
-                return pd.DataFrame(columns=default_cols)
+    new_df = pd.DataFrame(rows, columns=default_cols)
 
-        # S3
-        s3_bytes = s3_download_bytes(MOVE_LOG_CSV)
-        if s3_bytes is not None:
-            try:
-                return pd.read_csv(io.BytesIO(s3_bytes))
-            except Exception:
-                return pd.DataFrame(columns=default_cols)
+    # ---- 1) 기존 로그는 load_move_log()로 읽어서 동일 경로 사용 ----
+    try:
+        old_df = load_move_log()
+    except Exception:
+        old_df = pd.DataFrame(columns=default_cols)
 
-        # 아무것도 없으면 빈 DF
-        return pd.DataFrame(columns=default_cols)
+    if old_df is None or old_df.empty:
+        log_df = new_df
+    else:
+        # 혹시 예전 CSV에 컬럼이 빠져 있으면 채워주기
+        for c in default_cols:
+            if c not in old_df.columns:
+                old_df[c] = pd.NA
+        old_df = old_df[default_cols]
 
-    old_df = _load_existing_log()
+        log_df = pd.concat([old_df, new_df], ignore_index=True)
 
-    # 3) 예전 CSV에 누락 컬럼 있으면 채워주기
-    for c in default_cols:
-        if c not in old_df.columns:
-            old_df[c] = pd.NA
-
-    old_df = old_df[default_cols]
-
-    # 4) 새 로그 붙이기
-    log_df = pd.concat([old_df, new_df[default_cols]], ignore_index=True)
-
-    # 5) 세션에 저장 (화면에서 바로 보이게)
+    # ---- 2) 세션 / 로컬 / S3 모두 동일하게 저장 ----
     buf = io.BytesIO()
     log_df.to_csv(buf, index=False, encoding="utf-8-sig")
     data = buf.getvalue()
+
+    # 세션에 저장해서 앱에서 바로 보이게
     ss["move_log_csv_bytes"] = data
 
-    # 캐시 무효화
+    # 캐시 무효화 → 다음 load_move_log() 때 새로 읽도록
     _load_move_log_core.clear()
 
-    # 6) 로컬 파일 저장 (가능하면)
+    # 로컬 CSV 저장 (가능한 환경에서만)
     try:
         log_df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
     except Exception:
         pass
 
-    # 7) S3 업로드 (가능하면)
+    # S3에도 업로드 (설정되어 있으면)
     s3_upload_bytes(MOVE_LOG_CSV, data)
+
 
 # ==============================
 # 업로드 시간 표시 유틸  (S3 → 로컬 순으로 확인)
@@ -1457,9 +1436,8 @@ def render_tab_move():
                 i = idx[0]
                 old_qty = float(df_all.at[i, "통용량"])
                 new_qty = drum_new_qty.get(dn, old_qty)
-
-                # 변화량 = 변경 전 - 변경 후 (줄어들면 +값)
-                moved = old_qty - new_qty
+                
+                moved = new_qty - old_qty
 
                 # CSV 반영
                 df_all.at[i, "통용량"] = new_qty
