@@ -5,7 +5,6 @@ from datetime import datetime, date
 import io
 import math
 import boto3
-import time
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -1179,14 +1178,7 @@ def render_tab_move():
     # ===== 왼쪽: 조회 정보 + 통 선택 =====
     with col_left2:
         st.markdown("### 🧾 조회 정보")
-
-        # ✅ 방금 조회했을 때만 2초짜리 메시지 보여주기
-        if ss.get("mv_just_searched", False):
-            msg_box = st.empty()
-            msg_box.success("조회가 완료되었습니다.")
-            time.sleep(2)
-            msg_box.empty()
-            ss["mv_just_searched"] = False
+        st.success("조회가 완료되었습니다.")
 
         st.markdown(
             f"""
