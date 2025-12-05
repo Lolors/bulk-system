@@ -580,7 +580,7 @@ def write_move_log(
     """
     이동 이력을 bulk_move_log.csv에 기록.
     drum_infos: [(통번호, moved_qty, old_qty, new_qty), ...]
-        moved_qty 는 '변경 후 용량 - 변경 전 용량' (보통 음수, 사용량)
+        moved_qty = 변경 후 용량 - 변경 전 용량 (보통 음수, 사용량)
     """
     if not drum_infos:
         return
@@ -588,10 +588,9 @@ def write_move_log(
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    # 새로 추가할 로그 행 만들기
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    default_cols = [
+    cols = [
         "시간",
         "ID",
         "품번",
@@ -617,51 +616,54 @@ def write_move_log(
                 "통번호": drum_no,
                 "변경 전 용량": old_qty,
                 "변경 후 용량": new_qty,
-                "변화량": moved_qty,  # ✅ new - old (대부분 음수)
+                "변화량": moved_qty,  # (변경 후 - 변경 전) → 보통 음수
                 "변경 전 위치": from_zone,
                 "변경 후 위치": to_zone,
             }
         )
 
-    new_df = pd.DataFrame(rows, columns=default_cols)
+    new_df = pd.DataFrame(rows, columns=cols)
 
-    # ---- 1) 기존 로그는 load_move_log()로 읽어서 동일 경로 사용 ----
+    # 1) 로컬 CSV에 직접 append
     try:
-        old_df = load_move_log()
+        if os.path.exists(MOVE_LOG_CSV):
+            # 이미 파일 있으면 header 없이 뒤에 붙이기
+            new_df.to_csv(
+                MOVE_LOG_CSV,
+                mode="a",
+                header=False,
+                index=False,
+                encoding="utf-8-sig",
+            )
+        else:
+            # 처음 만들 때는 header 포함
+            new_df.to_csv(
+                MOVE_LOG_CSV,
+                index=False,
+                encoding="utf-8-sig",
+            )
     except Exception:
-        old_df = pd.DataFrame(columns=default_cols)
+        # 로컬에 못 쓰더라도 앱 죽지 않도록
+        pass
 
-    if old_df is None or old_df.empty:
-        log_df = new_df
-    else:
-        # 혹시 예전 CSV에 컬럼이 빠져 있으면 채워주기
-        for c in default_cols:
-            if c not in old_df.columns:
-                old_df[c] = pd.NA
-        old_df = old_df[default_cols]
-
-        log_df = pd.concat([old_df, new_df], ignore_index=True)
-
-    # ---- 2) 세션 / 로컬 / S3 모두 동일하게 저장 ----
-    buf = io.BytesIO()
-    log_df.to_csv(buf, index=False, encoding="utf-8-sig")
-    data = buf.getvalue()
-
-    # 세션에 저장해서 앱에서 바로 보이게
-    ss["move_log_csv_bytes"] = data
-
-    # 캐시 무효화 → 다음 load_move_log() 때 새로 읽도록
-    _load_move_log_core.clear()
-
-    # 로컬 CSV 저장 (가능한 환경에서만)
+    # 2) 방금 저장된 CSV 전체를 다시 읽어서 세션/S3에 반영
     try:
-        log_df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+        with open(MOVE_LOG_CSV, "rb") as f:
+            data = f.read()
+        ss["move_log_csv_bytes"] = data
+    except Exception:
+        # 로컬 파일이 없을 수도 있으니 그냥 무시
+        data = None
+
+    # 캐시 무효화 → 다음 load_move_log()는 새 내용을 읽음
+    try:
+        _load_move_log_core.clear()
     except Exception:
         pass
 
-    # S3에도 업로드 (설정되어 있으면)
-    s3_upload_bytes(MOVE_LOG_CSV, data)
-
+    # 3) S3에도 업로드 (환경에서 사용 중이면)
+    if data is not None:
+        s3_upload_bytes(MOVE_LOG_CSV, data)
 
 # ==============================
 # 업로드 시간 표시 유틸  (S3 → 로컬 순으로 확인)
