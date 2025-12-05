@@ -828,18 +828,16 @@ def render_login():
     st.title("🏭 벌크 관리 시스템 - 로그인")
     st.markdown("작업 전 ID와 비밀번호를 입력해 주세요.")
 
-    # ✅ form 안에 넣어서
-    #    - 엔터 ⇒ form_submit_button("로그인") 동작
-    #    - 버튼 클릭 ⇒ 역시 로그인
+    # ✅ form 사용: 엔터 → 로그인, 버튼 → 로그인
     with st.form("login_form"):
         login_id = st.text_input("ID", key="login_id")
         login_pw = st.text_input("비밀번호", type="password", key="login_pw")
 
-        # ✅ 로그인 유지하기 (브라우저 세션 동안만 유지)
+        # 🔹 위젯용 key와 세션 저장용 key를 분리
         remember = st.checkbox(
             "로그인 상태 유지",
-            key="login_remember",
-            value=ss.get("login_remember", False),
+            key="login_remember_checkbox",              # 위젯 키
+            value=ss.get("remember_me", False),         # 저장된 값 불러오기
         )
 
         login_submitted = st.form_submit_button("로그인")
@@ -851,7 +849,7 @@ def render_login():
         if user and login_pw == user["password"]:
             ss["user_id"] = (login_id or "").strip()
             ss["user_name"] = user["display_name"]
-            ss["login_remember"] = remember  # 체크 상태 기억 (현재 브라우저 세션 기준)
+            ss["remember_me"] = bool(remember)          # ✅ 위젯키와 다른 세션 키에 저장
 
             st.success(f"{user['display_name']}님, 환영합니다.")
             st.rerun()
