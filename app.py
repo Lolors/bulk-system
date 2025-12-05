@@ -985,7 +985,7 @@ if search_by_lot:
     if not lot_input:
         st.warning("로트번호가 비어 있습니다.")
         ss["mv_searched_csv"] = False
-        return
+         return
 
     # 검색용은 소문자로 변환하여 대소문자 무시
     lot_key = lot_input.lower()
