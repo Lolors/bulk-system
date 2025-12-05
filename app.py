@@ -1161,8 +1161,6 @@ def render_tab_move():
         stock_loc_display = stock_summary_text
     else:
         stock_loc_display = current_zone
-    else:
-        stock_loc_display = current_zone
 
     col_left2, col_right2 = st.columns(2)
 
