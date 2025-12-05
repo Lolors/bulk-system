@@ -5,6 +5,7 @@ from datetime import datetime, date
 import io
 import math
 import boto3
+import time
 
 # ==============================
 # 사용자 계정 (로그인용)
@@ -824,25 +825,42 @@ def render_file_loader():
 # ==============================
 def render_login():
     ss = st.session_state
-    st.title("🏭 벌크 관리 시스템 - 로그인")
 
+    # 🔹 이전에 로그인했던 ID가 있으면 기본값으로 넣어주기
+    #    (단, 이번 세션에서 login_id가 아직 안 만들어졌을 때만)
+    if "last_login_id" in ss and "login_id" not in ss:
+        ss["login_id"] = ss["last_login_id"]
+
+    st.title("🏭 벌크 관리 시스템 - 로그인")
     st.markdown("작업 전 ID와 비밀번호를 입력해 주세요.")
 
-    login_id = st.text_input("ID", key="login_id")
-    login_pw = st.text_input("비밀번호", type="password", key="login_pw")
+    # ✅ form 사용: 엔터로도 로그인, 버튼으로도 로그인
+    with st.form("login_form"):
+        login_id = st.text_input("ID", key="login_id")
+        login_pw = st.text_input("비밀번호", type="password", key="login_pw")
 
-    # 엔터로 로그인 가능하도록 처리
-    if login_id and login_pw:
+        login_submitted = st.form_submit_button("로그인")
+
+    # 폼 제출(엔터 또는 버튼 클릭) 시 로그인 처리
+    if login_submitted:
         user = USER_ACCOUNTS.get((login_id or "").strip())
+
         if user and login_pw == user["password"]:
             ss["user_id"] = (login_id or "").strip()
             ss["user_name"] = user["display_name"]
+
+            # 🔹 마지막에 성공적으로 로그인한 ID 기억
+            ss["last_login_id"] = (login_id or "").strip()
+
+            # 혹시 예전에 쓰던 로그인 유지 관련 키가 있다면 정리 (선택 사항)
+            for k in ["remember_me", "login_remember_checkbox"]:
+                if k in ss:
+                    del ss[k]
+
             st.success(f"{user['display_name']}님, 환영합니다.")
             st.rerun()
-
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
-
 
 # ==============================
 # (생략됐던) get_stock_summary 더미 정의
@@ -857,13 +875,12 @@ def get_stock_summary(item_code: str, lot: str):
 
 
 # ==============================
-# 탭 1: 이동
+# 탭 1: 이동 - 입력값 초기화
 # ==============================
 def clear_move_inputs():
     """이동 탭 입력값 초기화 콜백."""
     ss = st.session_state
 
-    # 텍스트 입력/검색 관련 키들 제거
     for k in [
         "mv_barcode",
         "mv_lot",
@@ -874,86 +891,82 @@ def clear_move_inputs():
         "mv_show_stock_detail",
         "mv_show_move_history_here",
         "clicked_zone_csv",
+        "mv_just_searched",
     ]:
         if k in ss:
             del ss[k]
 
-
+# ==============================
+# 탭 1: 이동
+# ==============================
 def render_tab_move():
     st.markdown("### 📦 벌크 이동")
 
     ss = st.session_state
     ss.setdefault("mv_searched_csv", False)
     ss.setdefault("mv_search_by_lot", False)
-    ss.setdefault("mv_last_lot", "")
-    ss.setdefault("mv_last_barcode", "")
     ss.setdefault("mv_show_stock_detail", False)
     ss.setdefault("mv_show_move_history_here", False)
 
-    bulk_type = st.radio(
-        "벌크 구분을 선택해 주세요.",
-        ["자사", "사급"],
-        horizontal=True,
-        key="mv_bulk_type_csv",
-    )
-    barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
+    # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
+    with st.form("move_search_form"):
+        bulk_type = st.radio(
+            "벌크 구분을 선택해 주세요.",
+            ["자사", "사급"],
+            horizontal=True,
+            key="mv_bulk_type_csv",
+        )
 
-    # ================== 입력 + 조회/초기화: form으로 묶어서 엔터=조회 ==================
-    with st.form("mv_search_form"):
+        barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
+
+        # 🔹 입력칸 두 개 나란히 (예전 너비 느낌 유지)
         col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
-
         with col_in1:
             barcode = st.text_input(
                 barcode_label,
                 key="mv_barcode",
                 placeholder="예: W24012345",
             )
-
         with col_in2:
             lot_input = st.text_input(
                 "로트번호",
                 key="mv_lot",
-                placeholder="예: 2e075k",
+                placeholder="예: 2E075K",
             )
 
-        st.write("")
-        btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
-        with btn_col1:
-            search_clicked = st.form_submit_button("조회하기")
-        with btn_col2:
-            clear_clicked = st.form_submit_button("초기화")
+        # 🔹 조회하기 / 초기화 버튼 한 줄
+        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
+        with col_b1:
+            search_submit = st.form_submit_button("조회하기", use_container_width=True)
+        with col_b2:
+            reset_submit = st.form_submit_button("초기화", use_container_width=True)
 
-    if clear_clicked:
+    # ----- 초기화 버튼 -----
+    if reset_submit:
         clear_move_inputs()
-        return
+        st.rerun()
 
-    # 조회 버튼 또는 엔터(submit) 처리
-    if search_clicked:
-        barcode_val = (barcode or "").strip()
+    # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
+    if search_submit:
         lot_val = (lot_input or "").strip()
-
-        if not lot_val and not barcode_val:
-            st.warning("먼저 작업번호/입하번호 또는 로트번호를 입력해 주세요.")
-            ss["mv_searched_csv"] = False
-            return
-
-        search_by_lot = bool(lot_val)
+        barcode_val = (barcode or "").strip()
 
         ss["mv_last_lot"] = lot_val
         ss["mv_last_barcode"] = barcode_val
-        ss["mv_search_by_lot"] = search_by_lot
+        ss["mv_search_by_lot"] = bool(lot_val)  # 로트가 있으면 로트 기준 조회
         ss["mv_searched_csv"] = True
-        ss["mv_show_move_history_here"] = False
+        ss["mv_just_searched"] = True  # 이번에 막 조회함 표시
 
-    if not ss["mv_searched_csv"]:
+    # 🔹 한 번도 조회한 적 없으면 아래는 안 그림
+    if not ss.get("mv_searched_csv", False):
         return
 
-    # ===================== 검색 후 로직 =====================
+    # 여기부터는 "마지막 조회 조건" 기반으로 항상 화면 그림
+    bulk_type = ss.get("mv_bulk_type_csv", "자사")
     df = load_drums()
     prod_df = load_production()
     recv_df = load_receive()
 
-    search_by_lot = ss.get("mv_search_by_lot", False)
     lot = ""
     item_code = ""
     item_name = ""
@@ -961,14 +974,22 @@ def render_tab_move():
     prod_qty = None
     line = ""
     barcode_used = ""
+    lot_lower = ""
 
+    search_by_lot = ss.get("mv_search_by_lot", False)
+
+    # ================== 로트 / 작업번호 / 입하번호 해석 ==================
     if search_by_lot:
-        lot = (ss.get("mv_last_lot") or "").strip()
-        if not lot:
+        lot_input = (ss.get("mv_last_lot") or "").strip()
+        if not lot_input:
             st.warning("로트번호가 비어 있습니다.")
             ss["mv_searched_csv"] = False
             return
-        barcode_used = lot
+
+        lot = lot_input
+        lot_lower = lot_input.lower()
+        barcode_used = lot_input
+
     else:
         barcode_query = (ss.get("mv_last_barcode") or "").strip()
         if not barcode_query:
@@ -976,13 +997,17 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
+        barcode_used = barcode_query
+        q = barcode_query.lower()
+
         if bulk_type == "자사":
+            # 🟡 자사: 작업번호 (대소문자 무시)
             if prod_df.empty:
                 st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            hit = prod_df[prod_df["작업번호"].astype(str) == barcode_query]
+            hit = prod_df[prod_df["작업번호"].astype(str).str.lower() == q]
             if hit.empty:
                 st.warning("해당 작업번호를 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
@@ -1008,7 +1033,8 @@ def render_tab_move():
             )
             save_drums(df)
 
-        else:  # 사급
+        else:
+            # 🟡 사급: 입하번호 (대소문자 무시)
             if recv_df.empty:
                 st.error("receive.xlsx 파일을 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
@@ -1019,7 +1045,7 @@ def render_tab_move():
                 ss["mv_searched_csv"] = False
                 return
 
-            hit = recv_df[recv_df["입하번호"].astype(str) == barcode_query]
+            hit = recv_df[recv_df["입하번호"].astype(str).str.lower() == q]
             if hit.empty:
                 st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
@@ -1067,12 +1093,12 @@ def render_tab_move():
             )
             save_drums(df)
 
-        barcode_used = barcode_query
+        lot_lower = (lot or "").lower()
 
     # ---------- LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
-    lot_lower = str(lot).lower()
-    lot_df = df[df["로트번호"].astype(str).str.lower() == lot_lower].copy()
+    df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+    lot_df = df[df["lot_lower"] == lot_lower].copy()
 
     if lot_df.empty:
         st.warning("CSV에서 해당 로트번호의 통 정보를 찾을 수 없습니다.")
@@ -1153,7 +1179,14 @@ def render_tab_move():
     # ===== 왼쪽: 조회 정보 + 통 선택 =====
     with col_left2:
         st.markdown("### 🧾 조회 정보")
-        st.success("조회가 완료되었습니다.")
+
+        # ✅ 방금 조회했을 때만 2초짜리 메시지 보여주기
+        if ss.get("mv_just_searched", False):
+            msg_box = st.empty()
+            msg_box.success("조회가 완료되었습니다.")
+            time.sleep(2)
+            msg_box.empty()
+            ss["mv_just_searched"] = False
 
         st.markdown(
             f"""
@@ -1166,7 +1199,7 @@ def render_tab_move():
             """
         )
 
-        # 현재 위치 + [상세보기] + [이동이력] 버튼
+        # 현재 위치 + [상세보기] + [이동이력]
         loc_col1, loc_col2 = st.columns([3, 2])
         with loc_col1:
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
@@ -1179,7 +1212,6 @@ def render_tab_move():
                 if st.button("이동이력", key=f"move_hist_btn_{lot}"):
                     ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
-        # 전산 재고 상세 토글
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
                 st.markdown("#### 🔎 전산 재고 상세")
@@ -1193,7 +1225,6 @@ def render_tab_move():
         drum_new_qty = {}
 
         drum_list = lot_df["통번호"].tolist()
-        # 모두 선택 / 모두 해제
         c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
@@ -1278,7 +1309,8 @@ def render_tab_move():
                 return
 
             df_all = load_drums()
-            lot_mask = df_all["로트번호"].astype(str).str.lower() == lot_lower
+            df_all["lot_lower"] = df_all["로트번호"].astype(str).str.lower()
+            lot_mask = df_all["lot_lower"] == lot_lower
 
             drum_logs = []
 
@@ -1303,7 +1335,6 @@ def render_tab_move():
 
             save_drums(df_all)
 
-            # CSV + 이동 이력 로그 저장
             write_move_log(
                 item_code=item_code,
                 item_name=item_name,
@@ -1315,7 +1346,7 @@ def render_tab_move():
 
             st.success(f"총 {len(drum_logs)}개의 통 정보가 CSV 및 이동 이력에 반영되었습니다.")
 
-    # 이동 탭 내부에서 현재 LOT 이동 이력 표시
+    # ================== 이동 탭 내부 LOT 이동 이력 ==================
     if ss.get("mv_show_move_history_here", False):
         log_df = load_move_log()
         if log_df.empty:
@@ -1328,7 +1359,6 @@ def render_tab_move():
                 st.markdown("### 📜 해당 로트번호 이동 이력")
                 sub = sub.sort_values("시간", ascending=False).head(50)
                 st.dataframe(sub, use_container_width=True)
-
 
 # ==============================
 # 탭 2: 조회
@@ -1348,9 +1378,9 @@ def render_tab_lookup():
     if query:
         q = query.strip()
         mask = (
-            df["로트번호"].astype(str).str.contains(q, na=False)
-            | df["품목코드"].astype(str).str.contains(q, na=False)
-            | df["품명"].astype(str).str.contains(q, na=False)
+            df["로트번호"].astype(str).str.contains(q, case=False, na=False)
+            | df["품목코드"].astype(str).str.contains(q, case=False, na=False)
+            | df["품명"].astype(str).str.contains(q, case=False, na=False)
         )
         df_view = df[mask]
     else:
@@ -1486,7 +1516,7 @@ def render_tab_map():
         st.write(f"**통 개수:** {drums}통")
         st.write(f"**총 용량:** {int(vol)}kg")
 
-        st.mark다운("---")
+        st.markdown("---")
         st.markdown("### 🔍 상세 목록")
 
         show_cols = [
@@ -1619,7 +1649,12 @@ def render_tab_move_log():
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
     if lot_filter:
-        mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
+        q = lot_filter.strip().lower()
+
+        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+
+        mask = df["lot_lower"].str.contains(q, na=False)
+
         df_view = df[mask].copy()
     else:
         df_view = df.copy()
