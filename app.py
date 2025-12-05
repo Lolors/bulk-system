@@ -1428,18 +1428,16 @@ def render_tab_move():
             drum_logs = []
 
             for dn in selected_drums:
-                # 해당 통 찾기
                 idx = df_all.index[lot_mask & (df_all["통번호"] == dn)]
                 if len(idx) == 0:
                     continue
-
                 i = idx[0]
                 old_qty = float(df_all.at[i, "통용량"])
                 new_qty = drum_new_qty.get(dn, old_qty)
-                
+
+                # 🔹 변화량 = 변경 후 용량 - 변경 전 용량  → 사용하면 대부분 음수
                 moved = new_qty - old_qty
 
-                # CSV 반영
                 df_all.at[i, "통용량"] = new_qty
                 df_all.at[i, "현재위치"] = to_zone
 
@@ -1448,13 +1446,11 @@ def render_tab_move():
                 else:
                     df_all.at[i, "상태"] = move_status
 
-                # 로그용 정보 기록
                 drum_logs.append((dn, moved, old_qty, new_qty))
 
-            # 통 정보 CSV 저장
             save_drums(df_all)
 
-            # 이동 이력 CSV 저장
+            # 🔹 여기서 이동 이력 CSV에 꼭 남긴다
             write_move_log(
                 item_code=item_code,
                 item_name=item_name,
