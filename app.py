@@ -862,6 +862,103 @@ def render_login():
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
 
 # ==============================
+# stock.xlsx 기반 전산 재고 요약
+# ==============================
+def get_stock_summary(item_code: str, lot: str):
+    """
+    stock.xlsx에서
+      - 품번(C열) == item_code
+      - 로트번호(G열) == lot
+      - 실재고수량(K열) != 0
+    조건을 만족하는 전산재고를 찾아
+      '대분류(창고명) 실재고수량kg'
+    형식으로 변환하여 반환한다.
+    """
+
+    stock_df = load_stock()
+    if stock_df is None or stock_df.empty:
+        return None, ""
+
+    if not item_code or not lot:
+        return None, ""
+
+    cols = list(stock_df.columns)
+    # 열 이름 설정 (한글이 없으면 위치(index) 기준)
+    try:
+        col_code = "창고코드" if "창고코드" in cols else cols[0]      # A열
+        col_name = "창고명"   if "창고명"   in cols else cols[1]      # B열
+        col_item = "품번"     if "품번"     in cols else cols[2]      # C열
+        col_lot  = "로트번호" if "로트번호" in cols else cols[6]      # G열
+        col_qty  = "실재고수량" if "실재고수량" in cols else cols[10] # K열
+    except Exception:
+        return None, ""
+
+    df = stock_df.copy()
+
+    # 비교용으로 문자열 정리
+    df[col_item] = df[col_item].astype(str).str.strip().str.lower()
+    df[col_lot]  = df[col_lot].astype(str).str.strip().str.lower()
+
+    item_key = str(item_code).strip().lower()
+    lot_key  = str(lot).strip().lower()
+
+    # 실재고수량 numeric 변환
+    df[col_qty] = pd.to_numeric(df[col_qty], errors="coerce").fillna(0)
+
+    # 조건 필터
+    mask = (
+        (df[col_item] == item_key) &
+        (df[col_lot] == lot_key) &
+        (df[col_qty] != 0)
+    )
+    sub = df[mask].copy()
+    if sub.empty:
+        return None, ""
+
+    # ----- A열 코드 분류 -----
+    JASA = {"WC301", "WC501", "WC502", "WC503", "WC504"}
+    WAREHOUSE = {"WH201", "WH701", "WH301", "WH601", "WH401", "WH506"}
+    BAD = {"WH001", "WH102", "WH202"}
+
+    def classify(code):
+        c = str(code).strip()
+        if c in JASA:
+            return "자사"
+        if c in WAREHOUSE:
+            return "창고"
+        if c in BAD:
+            return "불량"
+        return "외주"
+
+    sub["창고코드"] = sub[col_code].astype(str).str.strip()
+    sub["창고명"] = sub[col_name].astype(str).str.strip()
+    sub["실재고수량"] = pd.to_numeric(sub[col_qty], errors="coerce").fillna(0.0)
+    sub["대분류"] = sub["창고코드"].apply(classify)
+
+    # 대분류 + 창고명 기준 합산
+    grouped = (
+        sub.groupby(["대분류", "창고코드", "창고명"], as_index=False)["실재고수량"]
+        .sum()
+    )
+
+    # 수량 포맷
+    def fmt(v):
+        f = float(v)
+        return str(int(f)) if f.is_integer() else str(f)
+
+    # 최종 표시 문구 생성: 대분류(창고명) 실재고수량kg
+    grouped["표시"] = grouped.apply(
+        lambda r: f"{r['대분류']}({r['창고명']}) {fmt(r['실재고수량'])}kg",
+        axis=1,
+    )
+
+    detail_df = grouped[["대분류", "창고코드", "창고명", "실재고수량", "표시"]]
+    summary_text = " / ".join(grouped["표시"].tolist())
+
+    return detail_df, summary_text
+
+
+# ==============================
 # 탭 1: 이동 - 입력값 초기화
 # ==============================
 def clear_move_inputs():
@@ -1159,6 +1256,8 @@ def render_tab_move():
     if stock_summary_text:  # 요약 문자열 있으면 그걸 그대로 사용
         # 예: "창고(부자재창고) 10kg / 외주(위드맘) 20kg"
         stock_loc_display = stock_summary_text
+    else:
+        stock_loc_display = current_zone
     else:
         stock_loc_display = current_zone
 
