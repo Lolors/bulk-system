@@ -861,17 +861,71 @@ def render_login():
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
 
-# ==============================
-# (생략됐던) get_stock_summary 더미 정의
-# ==============================
 def get_stock_summary(item_code: str, lot: str):
     """
-    원래 코드에 있던 get_stock_summary가 질문 코드에는 없어서
-    최소한의 더미로 넣어 둡니다.
-    실제 전산 재고 연동 로직이 있다면 이 부분을 교체해 주세요.
-    """
-    return None, ""
+    stock.xlsx에서 품번(C열) / 로트번호(G열) / 실재고수량(K열)을 기준으로
+    전산 재고 요약을 반환한다.
 
+    - 품번(C열) == item_code
+    - 로트번호(G열) == lot
+    - 실재고수량(K열) != 0
+
+    반환값:
+      stock_df : '표시' 컬럼만 가진 DataFrame (예: "B열값 (K열값)")
+      text     : 위 '표시'들을 ", "로 이어 붙인 문자열
+    """
+    # stock.xlsx 불러오기
+    stock_df = load_stock()
+    if stock_df is None or stock_df.empty:
+        return None, ""
+
+    # item_code / lot 없으면 처리 안 함
+    if not item_code or not lot:
+        return None, ""
+
+    # 컬럼 이름 잡기 (우선 한글 컬럼명, 없으면 열 위치로 대응)
+    try:
+        col_item = "품번" if "품번" in stock_df.columns else stock_df.columns[2]   # C열
+        col_lot  = "로트번호" if "로트번호" in stock_df.columns else stock_df.columns[6]  # G열
+        col_qty  = "실재고수량" if "실재고수량" in stock_df.columns else stock_df.columns[10]  # K열
+        col_b    = stock_df.columns[1]  # B열
+    except Exception:
+        # 예상과 다른 구조이면 그냥 종료
+        return None, ""
+
+    df = stock_df.copy()
+
+    # 문자열 비교 (대소문자 무시, 앞뒤 공백 제거)
+    df[col_item] = df[col_item].astype(str).str.strip().str.lower()
+    df[col_lot]  = df[col_lot].astype(str).str.strip().str.lower()
+
+    item_key = str(item_code).strip().lower()
+    lot_key  = str(lot).strip().lower()
+
+    # 실재고수량 숫자 변환
+    df[col_qty] = pd.to_numeric(df[col_qty], errors="coerce").fillna(0)
+
+    # 조건 필터:
+    #   품번 일치 + 로트번호 일치 + 실재고수량 != 0
+    mask = (
+        (df[col_item] == item_key)
+        & (df[col_lot] == lot_key)
+        & (df[col_qty] != 0)
+    )
+    sub = df[mask].copy()
+
+    if sub.empty:
+        # 조건에 맞는 전산 재고 없음
+        return pd.DataFrame(columns=["표시"]), ""
+
+    # B열값 (K열값) 형식의 표시 컬럼 생성
+    sub["표시"] = sub[col_b].astype(str) + " (" + sub[col_qty].astype(str) + ")"
+
+    # 전체 요약 텍스트 (원하면 '현재 위치(전산 기준)' 등에 사용 가능)
+    text = ", ".join(sub["표시"].tolist())
+
+    # 상세보기용 DataFrame은 '표시' 컬럼만 보여주도록 반환
+    return sub[["표시"]], text 
 
 # ==============================
 # 탭 1: 이동 - 입력값 초기화
