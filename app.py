@@ -922,7 +922,7 @@ def render_tab_move():
 
     ss = st.session_state
 
-    # ================== 검색 폼 (엔터로도 조회) ==================
+    # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
     with st.form("move_search_form"):
         bulk_type = st.radio(
             "벌크 구분을 선택해 주세요.",
@@ -933,6 +933,7 @@ def render_tab_move():
 
         barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
+        # 🔹 입력칸 너비: 예전처럼 두 칸 나란히
         col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
         with col_in1:
             barcode = st.text_input(
@@ -947,13 +948,20 @@ def render_tab_move():
                 placeholder="예: 2E075K",
             )
 
-        search_clicked = st.form_submit_button("조회하기")
+        # 🔹 조회하기 / 초기화 버튼 한 줄
+        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
+        with col_b1:
+            form_submit = st.form_submit_button("조회하기", use_container_width=True)
+        with col_b2:
+            reset_clicked = st.form_submit_button("초기화", use_container_width=True)
 
-    # 초기화 버튼
-    st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+    # ----- 버튼 동작 -----
+    if reset_clicked:
+        clear_move_inputs()
+        st.rerun()
 
     # 조회 안 했으면 아래 내용 표시 안 함
-    if not search_clicked:
+    if not form_submit:
         return
 
     df = load_drums()
