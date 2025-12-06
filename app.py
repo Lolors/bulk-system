@@ -598,8 +598,10 @@ def save_move_log(df: pd.DataFrame):
 
 def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zone: str, to_zone: str):
     """
-    이동 이력을 bulk_move_log.csv에 '추가'하는 함수.
-    drum_infos: [(통번호, moved_qty, old_qty, new_qty), ...]
+    이동 이력을 bulk_move_log.csv에 기록.
+    drum_infos:
+      - 옛 형식: (통번호, moved_qty, old_qty, new_qty)
+      - 새 형식: (통번호, moved_qty, old_qty, new_qty, old_loc)
     ID 열에는 로그인한 사용자의 '표시 이름'을 남긴다.
     """
     if not drum_infos:
@@ -608,13 +610,19 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    # 🔹 한국 시간(KST) 기준 시간
-    KST = timezone(timedelta(hours=9))
-    ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    # 🔹 한국 시간(KST, UTC+9) 기준 시간 찍기
+    kst = timezone(timedelta(hours=9))
+    ts = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 새로 추가할 행들 구성
     rows = []
-    for drum_no, moved_qty, old_qty, new_qty in drum_infos:
+    for info in drum_infos:
+        # 🔹 튜플 길이에 따라 분기 (옛 데이터와 호환)
+        if len(info) == 4:
+            drum_no, moved_qty, old_qty, new_qty = info
+            old_loc = from_zone
+        else:
+            drum_no, moved_qty, old_qty, new_qty, old_loc = info
+
         rows.append(
             {
                 "시간": ts,
@@ -626,30 +634,54 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
                 "변경 전 용량": old_qty,
                 "변경 후 용량": new_qty,
                 "변화량": moved_qty,
-                "변경 전 위치": from_zone,
+                "변경 전 위치": old_loc,
                 "변경 후 위치": to_zone,
             }
         )
 
     new_df = pd.DataFrame(rows)
 
-    # 🔹 기존 로그 전체 불러오기 (없으면 빈 DF)
-    old_df = load_move_log()
-
-    if old_df is None or old_df.empty:
-        log_df = new_df
+    # 🔹 기존 로그 불러오기 (세션/로컬/S3)  ──> 여기에 "append" 되도록 유지
+    if "move_log_csv_bytes" in ss:
+        try:
+            old_df = pd.read_csv(io.BytesIO(ss["move_log_csv_bytes"]))
+        except Exception:
+            old_df = pd.DataFrame()
+    elif os.path.exists(MOVE_LOG_CSV):
+        try:
+            old_df = pd.read_csv(MOVE_LOG_CSV)
+        except Exception:
+            old_df = pd.DataFrame()
     else:
-        # 컬럼 정렬/맞추기 (혹시라도 컬럼 차이가 있을 때 대비)
-        for c in old_df.columns:
-            if c not in new_df.columns:
-                new_df[c] = pd.NA
+        s3_bytes = s3_download_bytes(MOVE_LOG_CSV)
+        if s3_bytes is not None:
+            try:
+                old_df = pd.read_csv(io.BytesIO(s3_bytes))
+            except Exception:
+                old_df = pd.DataFrame()
+        else:
+            old_df = pd.DataFrame()
 
-        # 기존 컬럼 순서 유지
-        new_df = new_df[old_df.columns]
-        log_df = pd.concat([old_df, new_df], ignore_index=True)
+    # 🔹 예전 로그 + 새 로그 이어붙이기
+    log_df = pd.concat([old_df, new_df], ignore_index=True)
 
-    # 🔹 최종 DF를 파일/세션/S3에 저장
-    save_move_log(log_df)
+    # 1) 세션에 다시 저장
+    buf = io.BytesIO()
+    log_df.to_csv(buf, index=False, encoding="utf-8-sig")
+    data = buf.getvalue()
+    ss["move_log_csv_bytes"] = data
+
+    _load_move_log_core.clear()
+
+    # 2) 로컬 CSV에도 저장 (로컬 실행용)
+    try:
+        log_df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
+
+    # 3) S3 업로드
+    s3_upload_bytes(MOVE_LOG_CSV, data)
+
 
 
 # ==============================
@@ -1432,12 +1464,15 @@ def render_tab_move():
                 if len(idx) == 0:
                     continue
                 i = idx[0]
+
+                # 🔹 변경 전 위치(통마다) 먼저 확보
+                old_loc = str(df_all.at[i, "현재위치"] or "")
+
                 old_qty = float(df_all.at[i, "통용량"])
                 new_qty = drum_new_qty.get(dn, old_qty)
+                moved = old_qty - new_qty
 
-                # 🔹 변화량 = 변경 후 용량 - 변경 전 용량  → 사용하면 대부분 음수
-                moved = new_qty - old_qty
-
+                # CSV 업데이트
                 df_all.at[i, "통용량"] = new_qty
                 df_all.at[i, "현재위치"] = to_zone
 
@@ -1446,21 +1481,22 @@ def render_tab_move():
                 else:
                     df_all.at[i, "상태"] = move_status
 
-                drum_logs.append((dn, moved, old_qty, new_qty))
+                # 🔹 통번호, 변화량, 전/후 용량, 변경 전 위치까지 담아서 로그로 보냄
+                drum_logs.append((dn, moved, old_qty, new_qty, old_loc))
 
             save_drums(df_all)
 
-            # 🔹 여기서 이동 이력 CSV에 꼭 남긴다
             write_move_log(
                 item_code=item_code,
                 item_name=item_name,
                 lot=lot,
                 drum_infos=drum_logs,
-                from_zone=from_zone,
+                from_zone=from_zone,  # 없던 옛 형식과도 호환용으로 유지
                 to_zone=to_zone,
             )
 
             st.success(f"총 {len(drum_logs)}개의 통 정보가 CSV 및 이동 이력에 반영되었습니다.")
+
 
     # ================== 이동 탭 내부 LOT 이동 이력 ==================
     if ss.get("mv_show_move_history_here", False):
