@@ -6,6 +6,12 @@ import io
 import math
 import boto3
 
+KST = timezone(timedelta(hours=9))
+
+def now_kst_str() -> str:
+    """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
+    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    
 # ==============================
 # 사용자 계정 (로그인용)
 # ==============================
@@ -610,9 +616,7 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    # 🔹 한국 시간(KST, UTC+9) 기준 시간 찍기
-    kst = timezone(timedelta(hours=9))
-    ts = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+    ts = now_kst_str()  # 🔹 한국 시간 기준
 
     rows = []
     for info in drum_infos:
@@ -641,7 +645,7 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 
     new_df = pd.DataFrame(rows)
 
-    # 🔹 기존 로그 불러오기 (세션/로컬/S3)  ──> 여기에 "append" 되도록 유지
+    # 기존 로그 불러오기 (세션/로컬/S3)
     if "move_log_csv_bytes" in ss:
         try:
             old_df = pd.read_csv(io.BytesIO(ss["move_log_csv_bytes"]))
@@ -662,7 +666,6 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
         else:
             old_df = pd.DataFrame()
 
-    # 🔹 예전 로그 + 새 로그 이어붙이기
     log_df = pd.concat([old_df, new_df], ignore_index=True)
 
     # 1) 세션에 다시 저장
@@ -681,7 +684,6 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
 
     # 3) S3 업로드
     s3_upload_bytes(MOVE_LOG_CSV, data)
-
 
 
 # ==============================
@@ -1778,7 +1780,7 @@ def render_tab_map():
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
 def render_tab_move_log():
-    st.markdown("### 📜 이동 이력 (수정 / 삭제 가능)")
+    st.markdown("### 📜 이동 이력 (롤백 전용 / 삭제만 가능)")
 
     df = load_move_log()
     if df.empty:
@@ -1805,11 +1807,8 @@ def render_tab_move_log():
 
     if lot_filter:
         q = lot_filter.strip().lower()
-
         df["lot_lower"] = df["로트번호"].astype(str).str.lower()
-
         mask = df["lot_lower"].str.contains(q, na=False)
-
         df_view = df[mask].copy()
     else:
         df_view = df.copy()
@@ -1860,16 +1859,19 @@ def render_tab_move_log():
         page_df[delete_col] = False
 
     st.caption(
-        "※ '시간'과 'ID'는 수정할 수 없습니다. "
-        "나머지 칼럼은 수정 가능하며, '삭제' 체크 후 '선택 행 삭제'를 누르면 해당 행이 삭제됩니다."
+        "※ LOG는 수정할 수 없습니다. "
+        "조회만 가능하며, '삭제'에 체크 후 '선택 행 삭제(롤백)'을 누르면 "
+        "해당 이동 이력은 삭제되고, 통 정보 CSV는 변경 전 상태로 롤백됩니다.\n"
+        "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다."
     )
 
+    # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
     edited_page = st.data_editor(
         page_df,
         use_container_width=True,
-        disabled=["시간", "ID"],
+        disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
-            delete_col: st.column_config.CheckboxColumn("삭제", help="삭제할 행에 체크"),
+            delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
@@ -1886,25 +1888,11 @@ def render_tab_move_log():
             pass
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
-    col_save, col_delete = st.columns(2)
-
-    with col_save:
-        if st.button("변경 내용 저장", key="log_save_changes"):
-            try:
-                df_updated = df.copy()
-                if delete_col in edited_page.columns:
-                    edited_for_update = edited_page.drop(columns=[delete_col])
-                else:
-                    edited_for_update = edited_page
-
-                df_updated.update(edited_for_update)
-                _save_full_log(df_updated)
-                st.success("이동 이력 변경 내용이 저장되었습니다.")
-            except Exception as e:
-                st.error(f"변경 내용을 저장하는 중 오류가 발생했습니다: {e}")
+    # 🔹 이제는 삭제(롤백) 버튼만 존재
+    _, col_delete = st.columns([3, 1])
 
     with col_delete:
-        if st.button("선택 행 삭제", key="log_delete_rows"):
+        if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
             try:
                 if delete_col in edited_page.columns:
                     to_del_idx = edited_page[edited_page[delete_col] == True].index
@@ -1912,15 +1900,86 @@ def render_tab_move_log():
                     to_del_idx = []
 
                 if len(to_del_idx) == 0:
-                    st.warning("삭제할 행을 먼저 '삭제' 칼럼에 체크해 주세요.")
-                else:
-                    df_updated = df.drop(index=to_del_idx)
-                    _save_full_log(df_updated)
-                    st.success(f"총 {len(to_del_idx)}개 행이 삭제되었습니다.")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"행을 삭제하는 중 오류가 발생했습니다: {e}")
+                    st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
+                    return
 
+                # 원본 전체 로그에서 삭제 대상 행 추출
+                rows_to_delete = df.loc[to_del_idx].copy()
+
+                # 1) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
+                log_all = df.copy()
+                log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
+
+                not_latest = []
+                for idx, row in rows_to_delete.iterrows():
+                    lot = str(row["로트번호"])
+                    drum_no = int(row["통번호"])
+
+                    mask = (
+                        log_all["로트번호"].astype(str) == lot
+                    ) & (log_all["통번호"] == drum_no)
+                    sub = log_all[mask]
+
+                    if sub.empty:
+                        continue
+
+                    sub_valid = sub.dropna(subset=["__dt"])
+                    if not sub_valid.empty:
+                        last_idx = sub_valid["__dt"].idxmax()
+                    else:
+                        # 시간 파싱이 안 되면, 인덱스 기준으로 가장 큰 값 = 마지막
+                        last_idx = sub.index.max()
+
+                    if idx != last_idx:
+                        not_latest.append(f"{lot} / 통 {drum_no}")
+
+                if not_latest:
+                    st.error(
+                        "롤백은 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다.\n"
+                        "다음 항목은 더 새로운 이력이 있어 롤백할 수 없습니다:\n"
+                        + ", ".join(not_latest)
+                    )
+                    return
+
+                # 2) 통 정보 CSV 롤백
+                drums_df = load_drums()
+                drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
+
+                for _, row in rows_to_delete.iterrows():
+                    lot = str(row["로트번호"])
+                    lot_lower = lot.lower()
+                    drum_no = int(row["통번호"])
+
+                    old_qty = float(row["변경 전 용량"])
+                    from_loc = str(row["변경 전 위치"]) if not pd.isna(row["변경 전 위치"]) else ""
+
+                    mask_drum = (drums_df["lot_lower"] == lot_lower) & (drums_df["통번호"] == drum_no)
+                    drum_idxs = drums_df.index[mask_drum]
+
+                    if len(drum_idxs) == 0:
+                        # 해당 통 정보가 CSV에 없으면 스킵
+                        continue
+
+                    i = drum_idxs[0]
+                    drums_df.at[i, "통용량"] = old_qty
+                    if from_loc:
+                        drums_df.at[i, "현재위치"] = from_loc
+                    # 상태까지 완벽히 복원하려면 로그에 상태를 추가로 기록해야 함.
+                    # 지금은 통용량/현재위치만 롤백.
+
+                if "lot_lower" in drums_df.columns:
+                    drums_df = drums_df.drop(columns=["lot_lower"])
+                save_drums(drums_df)
+
+                # 3) 이동 로그에서 행 삭제 + 저장
+                df_updated = df.drop(index=to_del_idx)
+                _save_full_log(df_updated)
+
+                st.success(f"총 {len(to_del_idx)}개 이동 이력이 삭제되고, 관련 통 정보가 롤백되었습니다.")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"행을 삭제(롤백)하는 중 오류가 발생했습니다: {e}")
 
 # ==============================
 # 탭 5: 데이터 파일 관리
