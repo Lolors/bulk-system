@@ -1059,7 +1059,7 @@ def render_tab_move():
 
         barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-        # 🔹 입력칸 두 개 나란히 (예전 너비 느낌 유지)
+        # 🔹 입력칸 두 개 나란히
         col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
         with col_in1:
             barcode = st.text_input(
@@ -1307,11 +1307,11 @@ def render_tab_move():
     else:
         current_zone = "혼합"
 
+    # stock.xlsx 기반 전산 재고 요약
     stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
-
-    if stock_summary_text:  # 요약 문자열 있으면 그걸 그대로 사용
-        # 예: "창고(부자재창고) 10kg / 외주(위드맘) 20kg"
-        stock_loc_display = stock_summary_text
+    if stock_summary_df is not None and not stock_summary_df.empty:
+        top = stock_summary_df.iloc[0]
+        stock_loc_display = f"{top['대분류']}({top['창고명']}) {int(top['실재고수량'])}kg"
     else:
         stock_loc_display = current_zone
 
@@ -1333,37 +1333,28 @@ def render_tab_move():
             """
         )
 
-        # 현재 위치 + [상세보기] + [이동이력]
-        loc_col1, loc_col2 = st.columns([3, 2])
-        with loc_col1:
+        # 🔹 현재 위치 + [상세보기] [이동이력] 한 줄 배치
+        col_info, col_btns = st.columns([3, 2])
+        with col_info:
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
-        with loc_col2:
-            b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
+        with col_btns:
+            b1_col, b2_col = st.columns(2)
             with b1_col:
-                if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
+                if st.button("상세보기", key=f"stock_detail_btn_{lot}", use_container_width=True):
                     ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
             with b2_col:
-                if st.button("이동이력", key=f"move_hist_btn_{lot}"):
+                if st.button("이동이력", key=f"move_hist_btn_{lot}", use_container_width=True):
                     ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
                 st.markdown("#### 🔎 전산 재고 상세")
 
-                # 행 수 기반 높이 자동 조정 (행당 약 35px + 헤더 40px)
-                n_rows = len(stock_summary_df)
-                row_h = 35
-                header_h = 40
-                height = header_h + row_h * (n_rows + 1)
-
-                st.dataframe(
-                    stock_summary_df,
-                    use_container_width=True,
-                    height=height
-                )
+                # 통번호, 창고명, 실재고수량만 표시
+                detail_df = stock_summary_df[["통번호", "창고명", "실재고수량"]].copy()
+                st.dataframe(detail_df, use_container_width=True, height=200)
             else:
                 st.info("전산 재고 데이터가 없습니다.")
-
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
@@ -1371,16 +1362,19 @@ def render_tab_move():
         drum_new_qty = {}
 
         drum_list = lot_df["통번호"].tolist()
-        c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
-        with c1:
-            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
+
+        # 🔹 모두 선택 / 모두 해제 한 줄 배치
+        col_sel_all, col_sel_none, _sp_sel = st.columns([1, 1, 4])
+        with col_sel_all:
+            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=True):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = True
-        with c2:
-            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=False):
+        with col_sel_none:
+            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=True):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = False
 
+        # 통 개별 체크 + 잔량 입력
         for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
             old_qty = float(row["통용량"])
@@ -1449,7 +1443,6 @@ def render_tab_move():
 
         note = st.text_area("비고(선택 입력)", height=80, key="mv_note_csv")
 
-        # ================== 이동 내용 저장 버튼 ==================
         if st.button("이동 내용 저장 (CSV 반영)", key="mv_save_csv"):
             if not selected_drums:
                 st.warning("이동하실 통을 한 개 이상 선택해 주세요.")
@@ -1466,15 +1459,11 @@ def render_tab_move():
                 if len(idx) == 0:
                     continue
                 i = idx[0]
-
-                # 🔹 변경 전 위치(통마다) 먼저 확보
-                old_loc = str(df_all.at[i, "현재위치"] or "")
-
                 old_qty = float(df_all.at[i, "통용량"])
+                old_loc = str(df_all.at[i, "현재위치"])
                 new_qty = drum_new_qty.get(dn, old_qty)
                 moved = old_qty - new_qty
 
-                # CSV 업데이트
                 df_all.at[i, "통용량"] = new_qty
                 df_all.at[i, "현재위치"] = to_zone
 
@@ -1483,7 +1472,7 @@ def render_tab_move():
                 else:
                     df_all.at[i, "상태"] = move_status
 
-                # 🔹 통번호, 변화량, 전/후 용량, 변경 전 위치까지 담아서 로그로 보냄
+                # (통번호, 변화량, 변경 전 용량, 변경 후 용량, 변경 전 위치)
                 drum_logs.append((dn, moved, old_qty, new_qty, old_loc))
 
             save_drums(df_all)
@@ -1493,12 +1482,11 @@ def render_tab_move():
                 item_name=item_name,
                 lot=lot,
                 drum_infos=drum_logs,
-                from_zone=from_zone,  # 없던 옛 형식과도 호환용으로 유지
+                from_zone=from_zone,
                 to_zone=to_zone,
             )
 
             st.success(f"총 {len(drum_logs)}개의 통 정보가 CSV 및 이동 이력에 반영되었습니다.")
-
 
     # ================== 이동 탭 내부 LOT 이동 이력 ==================
     if ss.get("mv_show_move_history_here", False):
