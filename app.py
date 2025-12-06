@@ -58,37 +58,6 @@ MOVE_LOG_CSV = "bulk_move_log.csv"     # 이동 이력
 RECEIVE_FILE = "receive.xlsx"          # 사급: 입하번호 기반
 STOCK_FILE = "stock.xlsx"              # 전산 재고
 
-# ======
-# 이동기록 버튼 크기
-# ======
-# HTML 버튼 클릭 처리
-query_params = st.query_params
-
-if "log_prev" in query_params:
-    if ss["log_page"] > 1:
-        ss["log_page"] -= 1
-    st.query_params.clear()   # 클린
-    st.rerun()
-
-if "log_next" in query_params:
-    if ss["log_page"] < total_pages:
-        ss["log_page"] += 1
-    st.query_params.clear()
-    st.rerun()
-
-st.markdown(
-    """
-    <style>
-    /* 이동 이력 페이지 네비게이션 버튼만 약간 작게 */
-    div.stButton > button[kind="secondary"] {
-        font-size: 0.8rem !important;
-        padding: 0.2rem 0.6rem !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ==============================
 # S3 연동 설정
 # ==============================
@@ -1854,37 +1823,30 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # 현재 페이지 번호 보정
+    # 현재 페이지 기본값
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # 🔹 페이지 네비게이션 (이전 / 페이지 / 다음) – 한 줄 배치 시도
-    colp1, colp2, colp3 = st.columns([1, 2, 1])
+    # 🔹 페이지 슬라이더 (한 줄에 깔끔하게 정렬됨 — 모바일에서도 유지됨)
+    ss["log_page"] = st.slider(
+        "페이지 이동",
+        min_value=1,
+        max_value=total_pages,
+        value=ss["log_page"],
+        step=1,
+        format="%d",
+    )
 
-    with colp1:
-        prev_clicked = st.button("◀ 이전", key="log_prev")
-
-    with colp2:
-        st.markdown(
-            f"<div style='text-align:center; font-size:0.85rem;'>"
-            f"페이지 {ss['log_page']} / {total_pages}<br>(총 {total_rows}건)"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    with colp3:
-        next_clicked = st.button("다음 ▶", key="log_next")
-
-    if prev_clicked and ss["log_page"] > 1:
-        ss["log_page"] -= 1
-        st.experimental_rerun()
-    if next_clicked and ss["log_page"] < total_pages:
-        ss["log_page"] += 1
-        st.experimental_rerun()
-
-    # 🔹 현재 페이지에 해당하는 구간만 잘라서 표시
+    # 현재 페이지 범위 계산
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
     page_df = df_view.iloc[start:end].copy()
+
+    st.markdown(
+        f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
+        f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
     
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
