@@ -61,29 +61,20 @@ STOCK_FILE = "stock.xlsx"              # 전산 재고
 # ======
 # 이동기록 버튼 크기
 # ======
-st.markdown("""
-<style>
-/* 이동 이력 페이지 네비게이션: 한 줄 유지 + 작은 버튼 */
-.nav-row-container .stHorizontalBlock {
-    flex-wrap: nowrap !important;          /* 컬럼이 줄 바꿈되지 않도록 */
-}
+# HTML 버튼 클릭 처리
+query_params = st.query_params
 
-/* nav-row 안의 버튼을 작게 */
-.nav-row-container .stButton > button {
-    font-size: 12px !important;
-    padding: 4px 10px !important;
-    height: 32px !important;
-}
+if "log_prev" in query_params:
+    if ss["log_page"] > 1:
+        ss["log_page"] -= 1
+    st.query_params.clear()   # 클린
+    st.rerun()
 
-/* 가운데 페이지 텍스트도 살짝 줄이기 */
-.nav-row-container .page-label {
-    font-size: 13px;
-    text-align: center;
-    margin-top: 4px;
-}
-</style>
-""", unsafe_allow_html=True)
-
+if "log_next" in query_params:
+    if ss["log_page"] < total_pages:
+        ss["log_page"] += 1
+    st.query_params.clear()
+    st.rerun()
 
 # ==============================
 # S3 연동 설정
@@ -1852,28 +1843,30 @@ def render_tab_move_log():
 
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # ----- 페이지 네비게이션 (한 줄 + 작은 버튼) -----
-    st.markdown("<div class='nav-row-container'>", unsafe_allow_html=True)
+# ----- 페이지 네비게이션 (HTML Flex로 강제 한 줄 고정) -----
+st.markdown(f"""
+<div style="
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 6px 0;
+">
+    <button onclick="window.location.href='?log_prev=true'" 
+        style="font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid #ccc;">
+        ◀ 이전
+    </button>
 
-    colp1, colp2, colp3 = st.columns([1, 2.2, 1])
+    <div style="font-size:13px; text-align:center;">
+        페이지 {ss["log_page"]} / {total_pages} (총 {total_rows}건)
+    </div>
 
-    with colp1:
-        if st.button("◀ 이전", key="log_prev"):
-            if ss["log_page"] > 1:
-                ss["log_page"] -= 1
-
-    with colp2:
-        st.markdown(
-            f"<div class='page-label'>페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)</div>",
-            unsafe_allow_html=True,
-        )
-
-    with colp3:
-        if st.button("다음 ▶", key="log_next"):
-            if ss["log_page"] < total_pages:
-                ss["log_page"] += 1
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    <button onclick="window.location.href='?log_next=true'" 
+        style="font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid #ccc;">
+        다음 ▶
+    </button>
+</div>
+""", unsafe_allow_html=True)
     
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
