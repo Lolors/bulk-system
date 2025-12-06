@@ -1633,13 +1633,13 @@ def render_tab_lookup():
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
+        # 🔹 한국 시간(KST) 기준 타임스탬프
         KST = timezone(timedelta(hours=9))
         ts = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
         backup_name = f"bulk_drums_extended_backup_{ts}.csv"
 
         df.to_csv(backup_name, index=False, encoding="utf-8-sig")
         st.success(f"백업 파일로 저장되었습니다: {backup_name}")
-
 
 
 # ==============================
