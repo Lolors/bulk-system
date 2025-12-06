@@ -76,6 +76,19 @@ if "log_next" in query_params:
     st.query_params.clear()
     st.rerun()
 
+st.markdown(
+    """
+    <style>
+    /* 이동 이력 페이지 네비게이션 버튼만 약간 작게 */
+    div.stButton > button[kind="secondary"] {
+        font-size: 0.8rem !important;
+        padding: 0.2rem 0.6rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ==============================
 # S3 연동 설정
 # ==============================
@@ -1844,18 +1857,31 @@ def render_tab_move_log():
     # 현재 페이지 번호 보정
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # ✅ 페이지 네비게이션 (이전 / 페이지 / 다음)
+    # 🔹 페이지 네비게이션 (이전 / 페이지 / 다음) – 한 줄 배치 시도
     colp1, colp2, colp3 = st.columns([1, 2, 1])
-    with colp1:
-        if st.button("◀ 이전", key="log_prev") and ss["log_page"] > 1:
-            ss["log_page"] -= 1
-    with colp2:
-        st.write(f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)")
-    with colp3:
-        if st.button("다음 ▶", key="log_next") and ss["log_page"] < total_pages:
-            ss["log_page"] += 1
 
-    # ✅ 여기서부터는 들여쓰기 *한 칸도* 더 안 들어가야 함
+    with colp1:
+        prev_clicked = st.button("◀ 이전", key="log_prev")
+
+    with colp2:
+        st.markdown(
+            f"<div style='text-align:center; font-size:0.85rem;'>"
+            f"페이지 {ss['log_page']} / {total_pages}<br>(총 {total_rows}건)"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    with colp3:
+        next_clicked = st.button("다음 ▶", key="log_next")
+
+    if prev_clicked and ss["log_page"] > 1:
+        ss["log_page"] -= 1
+        st.experimental_rerun()
+    if next_clicked and ss["log_page"] < total_pages:
+        ss["log_page"] += 1
+        st.experimental_rerun()
+
+    # 🔹 현재 페이지에 해당하는 구간만 잘라서 표시
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
     page_df = df_view.iloc[start:end].copy()
