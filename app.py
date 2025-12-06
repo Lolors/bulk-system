@@ -1348,11 +1348,25 @@ def render_tab_move():
             if st.button("이동이력", key=f"mv_move_history_{lot}"):
                 ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
-        # 🔍 전산 재고 상세
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
-                st.markdown("#### 전산 재고 상세")
-                st.dataframe(stock_summary_df, use_container_width=True, height=240)
+                st.markdown("#### 🔎 전산 재고 상세")
+
+                # 👉 필요한 컬럼만 정리 (통번호 / 창고명 / 실재고수량)
+                detail_df = stock_summary_df[["통번호", "창고명", "실재고수량"]].copy()
+                detail_df = detail_df.reset_index(drop=True)
+
+                # 👉 행 수에 맞춰 높이 계산
+                header_height = 40   # 헤더 영역 높이
+                row_height = 32      # 행 하나당 높이
+                n_rows = len(detail_df)
+                table_height = header_height + row_height * max(n_rows, 1)
+
+                st.dataframe(
+                    detail_df,
+                    use_container_width=True,
+                    height=table_height,
+                )
             else:
                 st.info("전산 재고 데이터가 없습니다.")
 
