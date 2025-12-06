@@ -1356,7 +1356,7 @@ def render_tab_move():
                 detail_df = stock_summary_df.copy()
 
                 # 👉 실제 존재하는 컬럼만 선택 (KeyError 방지)
-                wanted_cols = [c for c in ["창고코드", "창고명"] if c in detail_df.columns]
+                wanted_cols = [c for c in ["창고코드", "창고명", "실재고수량"] if c in detail_df.columns]
                 detail_df = detail_df[wanted_cols].reset_index(drop=True)
 
                 # 👉 행 개수에 맞춰 높이 계산
@@ -1372,6 +1372,7 @@ def render_tab_move():
                 )
             else:
                 st.info("전산 재고 데이터가 없습니다.")
+
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
