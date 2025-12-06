@@ -1841,32 +1841,24 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
+    # 현재 페이지 번호 보정
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-# ----- 페이지 네비게이션 (HTML Flex로 강제 한 줄 고정) -----
-st.markdown(f"""
-<div style="
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-    padding: 6px 0;
-">
-    <button onclick="window.location.href='?log_prev=true'" 
-        style="font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid #ccc;">
-        ◀ 이전
-    </button>
+    # ✅ 페이지 네비게이션 (이전 / 페이지 / 다음)
+    colp1, colp2, colp3 = st.columns([1, 2, 1])
+    with colp1:
+        if st.button("◀ 이전", key="log_prev") and ss["log_page"] > 1:
+            ss["log_page"] -= 1
+    with colp2:
+        st.write(f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)")
+    with colp3:
+        if st.button("다음 ▶", key="log_next") and ss["log_page"] < total_pages:
+            ss["log_page"] += 1
 
-    <div style="font-size:13px; text-align:center;">
-        페이지 {ss["log_page"]} / {total_pages} (총 {total_rows}건)
-    </div>
-
-    <button onclick="window.location.href='?log_next=true'" 
-        style="font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid #ccc;">
-        다음 ▶
-    </button>
-</div>
-""", unsafe_allow_html=True)
+    # ✅ 여기서부터는 들여쓰기 *한 칸도* 더 안 들어가야 함
+    start = (ss["log_page"] - 1) * page_size
+    end = start + page_size
+    page_df = df_view.iloc[start:end].copy()
     
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
