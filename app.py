@@ -58,6 +58,24 @@ MOVE_LOG_CSV = "bulk_move_log.csv"     # 이동 이력
 RECEIVE_FILE = "receive.xlsx"          # 사급: 입하번호 기반
 STOCK_FILE = "stock.xlsx"              # 전산 재고
 
+# ======
+# 이동기록 버튼 크기
+# ======
+st.markdown("""
+<style>
+/* 이동 이력: 페이지 네비 버튼만 작게 만들기 */
+.small-btn > button {
+    font-size: 12px !important;     /* 글씨 크기 축소 */
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    height: 32px !important;        /* 버튼 높이 축소 */
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ==============================
 # S3 연동 설정
 # ==============================
@@ -1825,26 +1843,35 @@ def render_tab_move_log():
 
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # ----- 페이지 네비게이션 (이전 / 페이지 / 다음 한 줄) -----
+    # ----- 페이지 네비게이션 (이전 / 페이지 / 다음 한 줄 + 폰트 축소) -----
     colp1, colp2, colp3 = st.columns([1, 2.2, 1])
 
     with colp1:
+        st.markdown("<div class='small-btn'>", unsafe_allow_html=True)
         if st.button("◀ 이전", key="log_prev"):
             if ss["log_page"] > 1:
                 ss["log_page"] -= 1
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with colp2:
         st.markdown(
-            f"<div style='text-align:center; padding-top:6px;'>"
-            f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)"
-            f"</div>",
+            f"""
+            <p style='text-align:center;
+                      font-size:13px;
+                      margin-top:4px;'>
+                페이지 {ss['log_page']} / {total_pages}
+                (총 {total_rows}건)
+            </p>
+            """,
             unsafe_allow_html=True
         )
 
     with colp3:
+        st.markdown("<div class='small-btn'>", unsafe_allow_html=True)
         if st.button("다음 ▶", key="log_next"):
             if ss["log_page"] < total_pages:
                 ss["log_page"] += 1
+        st.markdown("</div>", unsafe_allow_html=True)
 
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
