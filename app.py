@@ -63,14 +63,23 @@ STOCK_FILE = "stock.xlsx"              # 전산 재고
 # ======
 st.markdown("""
 <style>
-/* 이동 이력: 페이지 네비 버튼만 작게 만들기 */
-.small-btn > button {
-    font-size: 12px !important;     /* 글씨 크기 축소 */
-    padding-top: 4px !important;
-    padding-bottom: 4px !important;
-    padding-left: 10px !important;
-    padding-right: 10px !important;
-    height: 32px !important;        /* 버튼 높이 축소 */
+/* 이동 이력 페이지 네비게이션: 한 줄 유지 + 작은 버튼 */
+.nav-row-container .stHorizontalBlock {
+    flex-wrap: nowrap !important;          /* 컬럼이 줄 바꿈되지 않도록 */
+}
+
+/* nav-row 안의 버튼을 작게 */
+.nav-row-container .stButton > button {
+    font-size: 12px !important;
+    padding: 4px 10px !important;
+    height: 32px !important;
+}
+
+/* 가운데 페이지 텍스트도 살짝 줄이기 */
+.nav-row-container .page-label {
+    font-size: 13px;
+    text-align: center;
+    margin-top: 4px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1843,36 +1852,29 @@ def render_tab_move_log():
 
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # ----- 페이지 네비게이션 (이전 / 페이지 / 다음 한 줄 + 폰트 축소) -----
+    # ----- 페이지 네비게이션 (한 줄 + 작은 버튼) -----
+    st.markdown("<div class='nav-row-container'>", unsafe_allow_html=True)
+
     colp1, colp2, colp3 = st.columns([1, 2.2, 1])
 
     with colp1:
-        st.markdown("<div class='small-btn'>", unsafe_allow_html=True)
         if st.button("◀ 이전", key="log_prev"):
             if ss["log_page"] > 1:
                 ss["log_page"] -= 1
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with colp2:
         st.markdown(
-            f"""
-            <p style='text-align:center;
-                      font-size:13px;
-                      margin-top:4px;'>
-                페이지 {ss['log_page']} / {total_pages}
-                (총 {total_rows}건)
-            </p>
-            """,
-            unsafe_allow_html=True
+            f"<div class='page-label'>페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)</div>",
+            unsafe_allow_html=True,
         )
 
     with colp3:
-        st.markdown("<div class='small-btn'>", unsafe_allow_html=True)
         if st.button("다음 ▶", key="log_next"):
             if ss["log_page"] < total_pages:
                 ss["log_page"] += 1
-        st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("</div>", unsafe_allow_html=True)
+    
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
     page_df = df_view.iloc[start:end].copy()
