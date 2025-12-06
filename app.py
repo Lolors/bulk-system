@@ -1825,14 +1825,23 @@ def render_tab_move_log():
 
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
+    # ----- 페이지 네비게이션 (이전 / 페이지 / 다음 한 줄) -----
     colp1, colp2, colp3 = st.columns([1, 2, 1])
+
     with colp1:
-        if st.button("◀ 이전", key="log_prev") and ss["log_page"] > 1:
+        if st.button("◀ 이전", key="log_prev", use_container_width=True) and ss["log_page"] > 1:
             ss["log_page"] -= 1
+
     with colp2:
-        st.write(f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)")
+        st.markdown(
+            f"<p style='text-align:center; margin-top:0.6rem;'>"
+            f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)"
+            f"</p>",
+            unsafe_allow_html=True,
+        )
+
     with colp3:
-        if st.button("다음 ▶", key="log_next") and ss["log_page"] < total_pages:
+        if st.button("다음 ▶", key="log_next", use_container_width=True) and ss["log_page"] < total_pages:
             ss["log_page"] += 1
 
     start = (ss["log_page"] - 1) * page_size
