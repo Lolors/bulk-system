@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 import io
 import math
 import boto3
@@ -588,7 +588,9 @@ def write_move_log(
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 한국 시간(KST, UTC+9)으로 기록
+    kst = timezone(timedelta(hours=9))
+    ts = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
 
     cols = [
         "시간",
@@ -674,35 +676,46 @@ from datetime import datetime as dt_for_caption
 @st.cache_data(show_spinner=False, ttl=60)
 def last_upload_caption(filename: str) -> str:
     """
-    1) S3 객체가 있으면 그 객체의 LastModified 시간을 표시
-    2) 없으면 로컬 파일 수정시간을 표시
-    3) 둘 다 없으면 '업로드된 파일 없음'
+    파일의 마지막 업로드 시간을 KST(UTC+9) 시간으로 표시
+    1) S3 → 2) 로컬 파일 → 3) 없으면 표시 없음
     """
-    # 1) S3 LastModified -----------------------------------------
+    from datetime import timezone, timedelta, datetime as dt
+
+    # KST timezone
+    KST = timezone(timedelta(hours=9))
+
+    # ------------------------
+    # 1) S3 timestamp
+    # ------------------------
     try:
         if s3_enabled():
             client = get_s3_client()
             if client:
                 s3_path = _s3_key(filename)
                 resp = client.head_object(Bucket=S3_BUCKET_NAME, Key=s3_path)
-                lm = resp["LastModified"]  # timezone aware datetime
-                ts_str = lm.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                return f"S3 마지막 수정: {ts_str}"
+
+                lm = resp["LastModified"]     # timezone-aware datetime
+                lm_kst = lm.astimezone(KST)   # 👉 KST 로 변환
+
+                return f"S3 마지막 수정: {lm_kst.strftime('%Y-%m-%d %H:%M:%S')}"
     except Exception:
         pass
 
-    # 2) 로컬 파일 mtime -----------------------------------------
+    # ------------------------
+    # 2) Local file timestamp
+    # ------------------------
     if os.path.exists(filename):
         try:
-            ts = os.path.getmtime(filename)
-            dt = dt_for_caption.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-            return f"로컬 마지막 수정: {dt}"
+            ts = os.path.getmtime(filename)        # float (UTC 기준 timestamp)
+            lm_kst = dt.fromtimestamp(ts, KST)     # 👉 timestamp 를 KST 로 변환
+            return f"로컬 마지막 수정: {lm_kst.strftime('%Y-%m-%d %H:%M:%S')}"
         except Exception:
             return "로컬 파일 시간 읽기 오류"
 
-    # 3) 둘 다 없음 ----------------------------------------------
+    # ------------------------
+    # 3) No file
+    # ------------------------
     return "업로드된 파일이 없습니다."
-
 
 # ==============================
 # 데이터 파일 업로드 화면 (최초 1회용)
@@ -1574,10 +1587,13 @@ def render_tab_lookup():
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        KST = timezone(timedelta(hours=9))
+        ts = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
         backup_name = f"bulk_drums_extended_backup_{ts}.csv"
+
         df.to_csv(backup_name, index=False, encoding="utf-8-sig")
         st.success(f"백업 파일로 저장되었습니다: {backup_name}")
+
 
 
 # ==============================
