@@ -1355,21 +1355,13 @@ def render_tab_move():
                 # 원본 복사
                 detail_df = stock_summary_df.copy()
 
-                # 👉 통번호 컬럼이 없으면 빈 값으로 새로 만들어 줌
-                if "통번호" not in detail_df.columns:
-                    detail_df["통번호"] = ""
-
-                # 👉 실재고수량 컬럼 이름이 다를 수 있으면 여기서 맞춰 줘도 됨
-                # (예: '실재고수량(K열)' 이런 식이면 아래처럼 rename)
-                # detail_df = detail_df.rename(columns={"실재고수량(K열)": "실재고수량"})
-
                 # 👉 실제 존재하는 컬럼만 선택 (KeyError 방지)
-                wanted_cols = [c for c in ["통번호", "창고명", "실재고수량"] if c in detail_df.columns]
+                wanted_cols = [c for c in ["창고코드", "창고명"] if c in detail_df.columns]
                 detail_df = detail_df[wanted_cols].reset_index(drop=True)
 
                 # 👉 행 개수에 맞춰 높이 계산
-                header_height = 40   # 헤더 높이
-                row_height = 32      # 행 하나당 높이
+                header_height = 40   # 테이블 헤더
+                row_height = 32      # 각 행 높이
                 n_rows = len(detail_df)
                 table_height = header_height + row_height * max(n_rows, 1)
 
