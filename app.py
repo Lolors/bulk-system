@@ -1028,7 +1028,7 @@ def render_tab_move():
         barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
         # 🔹 입력칸 두 개 나란히 (예전 너비 느낌 유지)
-        col_in1, col_in2, _sp = st.columns([0.41, 0.41, 2.5])
+        col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
         with col_in1:
             barcode = st.text_input(
                 barcode_label,
