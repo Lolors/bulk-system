@@ -1333,18 +1333,16 @@ def render_tab_move():
             """
         )
 
-        # 🔹 현재 위치 + [상세보기] [이동이력] 한 줄 배치
-        col_info, col_btns = st.columns([3, 2])
-        with col_info:
-            st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
-        with col_btns:
-            b1_col, b2_col = st.columns(2)
-            with b1_col:
-                if st.button("상세보기", key=f"stock_detail_btn_{lot}", use_container_width=True):
-                    ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
-            with b2_col:
-                if st.button("이동이력", key=f"move_hist_btn_{lot}", use_container_width=True):
-                    ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
+        # 🔹 모두 선택 / 모두 해제 한 줄 배치
+        col_sel_all, col_sel_none, _sp_sel = st.columns([1, 1, 4])
+        with col_sel_all:
+            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=True):
+                for dn in drum_list:
+                    st.session_state[f"mv_sel_{lot}_{dn}"] = True
+        with col_sel_none:
+            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=True):
+                for dn in drum_list:
+                    st.session_state[f"mv_sel_{lot}_{dn}"] = False
 
         if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
@@ -1363,16 +1361,19 @@ def render_tab_move():
 
         drum_list = lot_df["통번호"].tolist()
 
-        # 🔹 모두 선택 / 모두 해제 한 줄 배치
+        # 🔹 모두 선택 / 모두 해제 한 줄 배치 (버튼 폭 줄이기)
         col_sel_all, col_sel_none, _sp_sel = st.columns([1, 1, 4])
+
         with col_sel_all:
-            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=True):
+            if st.button("모두 선택", key=f"mv_select_all_{lot}"):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = True
+
         with col_sel_none:
-            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=True):
+            if st.button("모두 해제", key=f"mv_select_none_{lot}"):
                 for dn in drum_list:
                     st.session_state[f"mv_sel_{lot}_{dn}"] = False
+
 
         # 통 개별 체크 + 잔량 입력
         for _, row in lot_df.iterrows():
