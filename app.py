@@ -1333,26 +1333,6 @@ def render_tab_move():
             """
         )
 
-        # 🔹 모두 선택 / 모두 해제 한 줄 배치
-        col_sel_all, col_sel_none, _sp_sel = st.columns([1, 1, 4])
-        with col_sel_all:
-            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=True):
-                for dn in drum_list:
-                    st.session_state[f"mv_sel_{lot}_{dn}"] = True
-        with col_sel_none:
-            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=True):
-                for dn in drum_list:
-                    st.session_state[f"mv_sel_{lot}_{dn}"] = False
-
-        if ss.get("mv_show_stock_detail", False):
-            if stock_summary_df is not None and not stock_summary_df.empty:
-                st.markdown("#### 🔎 전산 재고 상세")
-
-                # 통번호, 창고명, 실재고수량만 표시
-                detail_df = stock_summary_df[["통번호", "창고명", "실재고수량"]].copy()
-                st.dataframe(detail_df, use_container_width=True, height=200)
-            else:
-                st.info("전산 재고 데이터가 없습니다.")
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
@@ -1361,7 +1341,7 @@ def render_tab_move():
 
         drum_list = lot_df["통번호"].tolist()
 
-        # 🔹 모두 선택 / 모두 해제 한 줄 배치 (버튼 폭 줄이기)
+        # 🔹 모두 선택 / 모두 해제 한 줄 배치
         col_sel_all, col_sel_none, _sp_sel = st.columns([1, 1, 4])
 
         with col_sel_all:
