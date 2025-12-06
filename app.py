@@ -1315,35 +1315,11 @@ def render_tab_move():
     else:
         stock_loc_display = current_zone
 
+    # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
+    selected_drums = []
+    drum_new_qty = {}
+
     col_left2, col_right2 = st.columns(2)
-
-        st.markdown("### 🧾 조회 정보")
-        st.success("조회가 완료되었습니다.")
-
-        st.markdown(
-            f"""
-            **벌크 구분:** {bulk_type}  
-            **식별값:** {barcode_used}  
-            **품목코드:** {item_code}  
-            **품명:** {item_name}  
-            **로트번호:** {lot}  
-            **제조일자:** {prod_date}  
-            """
-        )
-
-        # 🔹 현재 위치 + [상세보기] [이동이력] 버튼
-        loc_col1, loc_col2 = st.columns([2, 1])
-        with loc_col1:
-            st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
-        with loc_col2:
-            btn_col1, btn_col2 = st.columns(2)
-            with btn_col1:
-                if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
-                    ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
-            with btn_col2:
-                if st.button("이동이력", key=f"move_hist_btn_{lot}"):
-                    ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
-
 
     # ===== 왼쪽: 조회 정보 + 통 선택 =====
     with col_left2:
@@ -1361,55 +1337,40 @@ def render_tab_move():
             """
         )
 
+        # 🔹 현재 위치 + 상세보기 / 이동이력 두 버튼을 한 줄에
+        st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("상세보기", key=f"mv_stock_detail_{lot}"):
+                ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
+        with btn_col2:
+            if st.button("이동이력", key=f"mv_move_history_{lot}"):
+                ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
+
+        # 🔍 전산 재고 상세
+        if ss.get("mv_show_stock_detail", False):
+            if stock_summary_df is not None and not stock_summary_df.empty:
+                st.markdown("#### 전산 재고 상세")
+                st.dataframe(stock_summary_df, use_container_width=True, height=240)
+            else:
+                st.info("전산 재고 데이터가 없습니다.")
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
-        selected_drums = []
-        drum_new_qty = {}
-
+        # 🔹 모두 선택 / 모두 해제 버튼을 한 줄에
         drum_list = lot_df["통번호"].tolist()
-
-        # 🔹 모두 선택 / 모두 해제 (한 덩어리만 존재해야 함)
-        col_sel_all, col_sel_none = st.columns(2)
-        with col_sel_all:
+        col_sel1, col_sel2 = st.columns(2)
+        with col_sel1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}"):
                 for dn in drum_list:
-                    st.session_state[f"mv_sel_{lot}_{dn}"] = True
-
-        with col_sel_none:
+                    ss[f"mv_sel_{lot}_{dn}"] = True
+        with col_sel2:
             if st.button("모두 해제", key=f"mv_select_none_{lot}"):
                 for dn in drum_list:
-                    st.session_state[f"mv_sel_{lot}_{dn}"] = False
+                    ss[f"mv_sel_{lot}_{dn}"] = False
 
-        # 🔹 아래부터는 각 통 체크박스 + 잔량 입력 루프
-        for _, row in lot_df.iterrows():
-            drum_no = int(row["통번호"])
-            old_qty = float(row["통용량"])
-            drum_loc = str(row.get("현재위치", "") or "").strip()
-
-            if drum_loc:
-                label = f"{drum_no}번 통 — 기존 {old_qty:.0f}kg (위치: {drum_loc})"
-            else:
-                label = f"{drum_no}번 통 — 기존 {old_qty:.0f}kg"
-
-            cb_key = f"mv_sel_{lot}_{drum_no}"
-            checked = st.checkbox(label, key=cb_key)
-            if checked:
-                selected_drums.append(drum_no)
-                new_val = st.number_input(
-                    f"통 {drum_no}의 현재 용량(kg)",
-                    min_value=0.0,
-                    max_value=old_qty,
-                    value=old_qty,
-                    step=10.0,
-                    format="%.0f",
-                    key=f"mv_qty_{lot}_{drum_no}",
-                )
-                drum_new_qty[drum_no] = float(new_val)
-
-
-
-        # 통 개별 체크 + 잔량 입력
+        # 🔹 통 개별 체크 + 잔량 입력
         for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
             old_qty = float(row["통용량"])
