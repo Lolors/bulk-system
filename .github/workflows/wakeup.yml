@@ -1,0 +1,15 @@
+name: Wake Up Streamlit App
+
+on:
+  schedule:
+    # 3시간마다 실행
+    - cron: "0 */3 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  wakeup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl request to wake up the Streamlit app
+        run: curl -I https://encbulk.streamlit.app || true
