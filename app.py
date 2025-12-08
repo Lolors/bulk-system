@@ -1336,44 +1336,42 @@ def render_tab_move():
             """
         )
 
-        # 🔹 현재 위치 + 상세보기 / 이동이력 두 버튼을 한 줄에
-        st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+        # 현재 위치 + [상세보기] + [이동이력]
+        loc_col1, loc_col2 = st.columns([3, 2])
+        with loc_col1:
+            st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+        with loc_col2:
+            b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
+            with b1_col:
+                if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
+                    ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
+            with b2_col:
+                if st.button("이동이력", key=f"move_hist_btn_{lot}"):
+                    ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
-            if st.button("상세보기", key=f"mv_stock_detail_{lot}"):
-                ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
-        with btn_col2:
-            if st.button("이동이력", key=f"mv_move_history_{lot}"):
-                ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
+        # 🔍 전산 재고 상세 (상세보기 눌렀을 때만)
+        if ss.get("mv_show_stock_detail", False):
+            if stock_summary_df is not None and not stock_summary_df.empty:
+                st.markdown("#### 🔎 전산 재고 상세")
 
-    # ----- 상세보기: stock.xlsx 기반 전산 재고 상세 -----
-    if ss.get("mv_show_stock_detail", False):
-        if stock_summary_df is not None and not stock_summary_df.empty:
-            st.markdown("#### 🔎 전산 재고 상세")
+                detail_df = stock_summary_df.copy()
+                wanted_cols = [c for c in ["창고코드", "창고명", "실재고수량"] if c in detail_df.columns]
+                detail_df = detail_df[wanted_cols].reset_index(drop=True)
 
-            # 원본 복사
-            detail_df = stock_summary_df.copy()
+                header_height = 40
+                row_height = 32
+                n_rows = len(detail_df)
+                table_height = header_height + row_height * max(n_rows, 1)
 
-            # 👉 실제 존재하는 컬럼만 선택 (KeyError 방지)
-            wanted_cols = [c for c in ["창고코드", "창고명", "실재고수량"] if c in detail_df.columns]
-            detail_df = detail_df[wanted_cols].reset_index(drop=True)
+                st.dataframe(
+                    detail_df,
+                    use_container_width=True,
+                    height=table_height,
+                )
+            else:
+                st.info("전산 재고 데이터가 없습니다.")
 
-            # 👉 행 개수에 맞춰 높이 계산
-            header_height = 40   # 테이블 헤더
-            row_height = 32      # 각 행 높이
-            n_rows = len(detail_df)
-            table_height = header_height + row_height * max(n_rows, 1)
-
-            st.dataframe(
-                detail_df,
-                use_container_width=True,
-                height=table_height,
-            )
-        else:
-            st.info("전산 재고 데이터가 없습니다.")
-
-
+        # 🔴 여기부터는 상세보기와 상관없이 항상 보여야 하는 영역
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
         selected_drums = []
@@ -1414,7 +1412,7 @@ def render_tab_move():
                     value=old_qty,
                     step=10.0,
                     format="%.0f",
-                    key=f"mv_qty_{lot}_{drum_no}",  # ⬅️ 이건 그대로 두어도 문제 없음
+                    key=f"mv_qty_{lot}_{drum_no}",
                 )
                 drum_new_qty[drum_no] = float(new_val)
 
