@@ -917,81 +917,56 @@ def render_login():
 
 def get_stock_summary(item_code: str, lot: str):
     """
-    stock.xlsx 기반 전산 재고 요약
-    - 품번(C열) == item_code
-    - 로트번호(G열) == lot
-    - 실재고수량(K열) != 0
-    를 만족하는 행만 사용.
-    """
+    stock.xlsx에서 '품번 + 로트번호' 기준으로 전산 재고 요약을 구한다.
 
+    stock.xlsx 컬럼 구조 (중요):
+      - A열: 창고/작업장
+      - B열: 창고/작업장명
+      - C열: 품번
+      - G열: 로트번호
+      - K열: 실재고수량
+    """
     stock_df = load_stock()
     if stock_df is None or stock_df.empty:
         return None, ""
 
-    # ---- 필요한 컬럼 이름 후보 정의 ----
-    #   A열 : 창고코드 / 창고작업장코드 등
-    code_col_candidates = ["창고코드", "창고작업장코드"]
-    #   B열 : 창고명
-    name_col_candidates = ["창고명", "창고/작업장명"]
-    #   C열 : 품번
-    item_col_candidates = ["품번", "품목코드"]
-    #   G열 : 로트번호
-    lot_col_candidates = ["로트번호", "LOTNO", "LOT_NO"]
-    #   K열 : 실재고수량
-    qty_col_candidates = ["실재고수량", "실재고수량(Kg)", "실재고수량(kg)"]
-
-    def pick_col(df, candidates):
-        for c in candidates:
-            if c in df.columns:
-                return c
-        return None
-
-    code_col = pick_col(stock_df, code_col_candidates)
-    name_col = pick_col(stock_df, name_col_candidates)
-    item_col = pick_col(stock_df, item_col_candidates)
-    lot_col = pick_col(stock_df, lot_col_candidates)
-    qty_col = pick_col(stock_df, qty_col_candidates)
-
-    need_cols = [code_col, name_col, item_col, lot_col, qty_col]
-    if any(c is None for c in need_cols):
-        # 필수 컬럼이 하나라도 없으면 전산 재고는 사용하지 않음
-        return None, ""
-
     df = stock_df.copy()
 
-    # 문자열 컬럼 정리
-    df[item_col] = df[item_col].astype(str).str.strip()
-    df[lot_col] = df[lot_col].astype(str).str.strip()
-    df[code_col] = df[code_col].astype(str).str.strip()
-    df[name_col] = df[name_col].astype(str).str.strip()
+    # 필수 컬럼만 남기고, 이름 통일
+    required_cols = ["창고/작업장", "창고/작업장명", "품번", "로트번호", "실재고수량"]
+    for c in required_cols:
+        if c not in df.columns:
+            # 필요한 컬럼이 하나라도 없으면 요약 불가
+            return None, ""
 
-    # 실재고수량 숫자화
-    df[qty_col] = pd.to_numeric(df[qty_col], errors="coerce").fillna(0)
+    # 문자열 정리
+    df["품번"] = df["품번"].astype(str).str.strip()
+    df["로트번호"] = df["로트번호"].astype(str).str.strip().str.upper()
 
-    # ---- 필터: 품목코드 & 로트번호 & 실재고수량 != 0 ----
-    ic = (item_code or "").strip()
-    lt = (lot or "").strip()
+    item_key = str(item_code).strip()
+    lot_key = str(lot).strip().upper()
 
-    mask = True
-    if ic:
-        mask &= df[item_col] == ic
-    if lt:
-        mask &= df[lot_col] == lt
+    # 품번 + 로트번호 완전 일치
+    df = df[(df["품번"] == item_key) & (df["로트번호"] == lot_key)]
 
-    mask &= df[qty_col] != 0
+    if df.empty:
+        return None, ""
 
-    sub = df[mask].copy()
-    if sub.empty:
-        return sub, ""
+    # 실재고수량 숫자화 + 0 제외
+    df["실재고수량"] = pd.to_numeric(df["실재고수량"], errors="coerce").fillna(0)
+    df = df[df["실재고수량"] != 0]
 
-    # ---- A열 코드 기준으로 대분류 매핑 ----
-    JASA_CODES = {"WC301", "WC501", "WC502", "WC503", "WC504"}
+    if df.empty:
+        return None, ""
+
+    # ----- 대분류 매핑 -----
+    ONSITE_CODES = {"WC301", "WC501", "WC502", "WC503", "WC504"}
     WAREHOUSE_CODES = {"WH201", "WH701", "WH301", "WH601", "WH401", "WH506"}
     DEFECT_CODES = {"WH001", "WH102"}
 
-    def classify_loc(code: str) -> str:
-        code = (code or "").strip()
-        if code in JASA_CODES:
+    def classify(code: str) -> str:
+        code = str(code).strip()
+        if code in ONSITE_CODES:
             return "자사"
         if code in WAREHOUSE_CODES:
             return "창고"
@@ -999,26 +974,21 @@ def get_stock_summary(item_code: str, lot: str):
             return "불량"
         return "외주"
 
-    sub["대분류"] = sub[code_col].apply(classify_loc)
+    df["대분류"] = df["창고/작업장"].apply(classify)
 
-    # 표시용 컬럼 통일
-    result = sub[[code_col, name_col, qty_col, "대분류"]].copy()
-    result = result.rename(
+    # 화면에서 쓰기 좋게 컬럼 이름 정리
+    summary = df[["창고/작업장", "창고/작업장명", "품번", "로트번호", "실재고수량", "대분류"]].copy()
+    summary = summary.rename(
         columns={
-            code_col: "창고코드",
-            name_col: "창고명",
-            qty_col: "실재고수량",
+            "창고/작업장": "창고코드",
+            "창고/작업장명": "창고명",
         }
     )
 
-    # 정렬(재고 많은 순)
-    result = result.sort_values("실재고수량", ascending=False).reset_index(drop=True)
+    # 재고 많은 순으로 정렬
+    summary = summary.sort_values("실재고수량", ascending=False).reset_index(drop=True)
 
-    # 첫 행 기준 텍스트 (안 써도 되지만 남겨둠)
-    top = result.iloc[0]
-    summary_txt = f"{top['대분류']}({top['창고명']}) {int(top['실재고수량'])}kg"
-
-    return result, summary_txt
+    return summary, ""
 
 # ==============================
 # 탭 1: 이동 - 입력값 초기화
