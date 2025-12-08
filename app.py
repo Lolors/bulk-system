@@ -1490,6 +1490,10 @@ def render_tab_move():
             df_all = load_drums()
             df_all["lot_lower"] = df_all["로트번호"].astype(str).str.lower()
             lot_mask = df_all["lot_lower"] == lot_lower
+            
+            # 🔹 사급 벌크인 경우, 최초 입고 상태(현재위치 = '미지정')의 통에만 제품라인을 기록
+            if bulk_type == "사급" and line:
+                df_all.loc[lot_mask & (df_all["현재위치"] == "미지정"), "제품라인"] = line
 
             drum_logs = []
 
