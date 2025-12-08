@@ -1653,15 +1653,48 @@ def render_tab_map():
     )
     floors = sorted(floors)
 
-    # 1층 제거
+    # 🔹 1층 제거
     floors = [f for f in floors if f != "1층"]
 
-    if not floors:
-        st.info("층 정보가 없습니다.")
+    # 🔹 특수 구역 분리
+    special_floors = {"소진", "외주", "창고", "폐기", "미지정"}
+
+    normal_floors = [f for f in floors if f not in special_floors]
+    special_available = [f for f in ["창고", "외주", "소진", "폐기", "미지정"] if f in floors]
+
+    if not normal_floors and not special_available:
+        st.info("층/구역 정보가 없습니다.")
         return
 
-    sel_floor = st.selectbox("확인하실 층/구역을 선택해 주세요.", floors, key="map_floor_csv")
+    # 🔹 보기 모드 선택
+    mode_options = []
+    if normal_floors:
+        mode_options.append("층별 보기")
+    if special_available:
+        mode_options.append("특수 구역 보기")
 
+    mode = st.radio(
+        "어떤 영역을 확인하시겠어요?",
+        mode_options,
+        horizontal=True,
+        key="map_mode",
+    )
+
+    # 🔹 선택 박스 분리
+    if mode == "층별 보기":
+        sel_floor = st.selectbox(
+            "확인하실 층을 선택해 주세요.",
+            normal_floors,
+            key="map_floor_csv",
+        )
+    else:
+        sel_floor = st.selectbox(
+            "확인하실 특수 구역을 선택해 주세요.",
+            special_available,
+            key="map_floor_special",
+        )
+
+    # 🔹 필터링
     fdf = df[df["층"] == sel_floor].copy()
     if fdf.empty:
         st.info("해당 층/구역에 등록된 벌크가 없습니다.")
