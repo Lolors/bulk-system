@@ -1653,6 +1653,9 @@ def render_tab_map():
     )
     floors = sorted(floors)
 
+    # 1층 제거
+    floors = [f for f in floors if f != "1층"]
+
     if not floors:
         st.info("층 정보가 없습니다.")
         return
