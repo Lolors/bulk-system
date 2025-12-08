@@ -1021,7 +1021,7 @@ def clear_move_inputs():
     """이동 탭 입력값 + 조회 상태 초기화 콜백."""
     ss = st.session_state
 
-    # 🔹 입력칸에 연결된 key까지 전부 삭제해야, 다음 렌더에서 공백으로 뜸
+    # 🔹 입력칸 + 상태 관련 키 전부 삭제
     for k in [
         "mv_barcode",             # 작업번호/입하번호 입력칸
         "mv_lot",                 # 로트번호 입력칸
@@ -1076,12 +1076,19 @@ def render_tab_move():
                 placeholder="예: 2E075K",
             )
 
-        # 🔹 조회하기 / 초기화 버튼 한 줄
-        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
+        # 🔹 조회하기 버튼만 (초기화는 폼 밖으로)
+        col_b1, _sp2 = st.columns([1, 6])
         with col_b1:
             search_submit = st.form_submit_button("조회하기", use_container_width=True)
-        with col_b2:
-            reset_submit = st.form_submit_button("초기화", use_container_width=True)
+
+    # 🔹 폼 밖: 초기화 버튼
+    col_reset, _sp3 = st.columns([1, 6])
+    with col_reset:
+        reset_clicked = st.button("초기화", key="mv_reset_btn", use_container_width=True)
+    if reset_clicked:
+        clear_move_inputs()
+        st.rerun()
+
 
     # ----- 초기화 버튼 -----
     if reset_submit:
