@@ -1445,7 +1445,7 @@ def render_tab_move():
         else:
             move_status = st.radio(
                 "이동 후 상태를 선택해 주세요.",
-                ["잔량", "생산종료"],
+                ["잔량", "생산대기", "생산종료"],
                 horizontal=True,
                 key="mv_status_csv",
             )
