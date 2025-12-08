@@ -1372,7 +1372,7 @@ def render_tab_move():
                 st.info("전산 재고 데이터가 없습니다.")
 
         # 🔴 여기부터는 상세보기와 상관없이 항상 보여야 하는 영역
-        st.markdown("### 🛢 통 선택 및 잔량 입력")
+        st.markdown("### ✅ 통 선택 및 잔량 입력")
 
         selected_drums = []
         drum_new_qty = {}
