@@ -1109,7 +1109,8 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        lot_lower = lot_input.upper()
+        # 🔹 화면/저장용은 항상 대문자
+        lot = lot_input.upper()
         barcode_used = lot_input
 
     else:
@@ -1214,8 +1215,6 @@ def render_tab_move():
                 prod_qty=prod_qty,
             )
             save_drums(df)
-
-        lot_lower = (lot or "").lower()
 
     # ---------- LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
