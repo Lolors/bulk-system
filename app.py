@@ -1076,19 +1076,12 @@ def render_tab_move():
                 placeholder="예: 2E075K",
             )
 
-        # 🔹 조회하기 버튼만 (엔터도 이걸 누른 걸로 인식)
+        # 🔹 조회하기 버튼만 (초기화는 폼 밖으로)
         col_b1, _sp2 = st.columns([1, 6])
         with col_b1:
             search_submit = st.form_submit_button("조회하기", use_container_width=True)
 
-    # 🔹 폼 밖: 초기화 버튼 (입력칸 비우기용)
-    col_reset, _sp3 = st.columns([1, 6])
-    with col_reset:
-        reset_clicked = st.button("초기화", key="mv_reset_btn", use_container_width=True)
 
-    if reset_clicked:
-        clear_move_inputs()
-        st.rerun()
 
     # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
     if search_submit:
