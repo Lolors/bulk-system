@@ -1018,13 +1018,13 @@ def get_stock_summary(item_code: str, lot: str):
 # 탭 1: 이동 - 입력값 초기화
 # ==============================
 def clear_move_inputs():
-    """이동 탭 입력값 + 조회 상태 초기화 콜백."""
+    """이동 탭 입력값 초기화 콜백."""
     ss = st.session_state
 
-    # 🔹 입력칸 + 상태 관련 키 전부 삭제
+    # 입력/검색 관련 키들 모두 삭제
     for k in [
-        "mv_barcode",             # 작업번호/입하번호 입력칸
-        "mv_lot",                 # 로트번호 입력칸
+        "mv_barcode",
+        "mv_lot",
         "mv_last_lot",
         "mv_last_barcode",
         "mv_search_by_lot",
@@ -1051,6 +1051,7 @@ def render_tab_move():
     ss.setdefault("mv_show_move_history_here", False)
 
     # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
+    # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
     with st.form("move_search_form"):
         bulk_type = st.radio(
             "벌크 구분을 선택해 주세요.",
@@ -1076,12 +1077,17 @@ def render_tab_move():
                 placeholder="예: 2E075K",
             )
 
-        # 🔹 조회하기 버튼만 (초기화는 폼 밖으로)
-        col_b1, _sp2 = st.columns([1, 6])
+        # 🔹 조회하기 / 초기화 버튼 한 줄
+        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
         with col_b1:
             search_submit = st.form_submit_button("조회하기", use_container_width=True)
+        with col_b2:
+            reset_submit = st.form_submit_button("초기화", use_container_width=True)
 
-
+    # ----- 초기화 버튼 처리 -----
+    if reset_submit:
+        clear_move_inputs()
+        st.rerun()
 
     # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
     if search_submit:
