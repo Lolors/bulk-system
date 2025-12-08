@@ -1018,13 +1018,10 @@ def get_stock_summary(item_code: str, lot: str):
 # 탭 1: 이동 - 입력값 초기화
 # ==============================
 def clear_move_inputs():
-    """이동 탭 입력값 초기화 콜백."""
+    """이동 탭 입력값/검색 상태 초기화 콜백."""
     ss = st.session_state
 
-    # 입력/검색 관련 키들 모두 삭제
     for k in [
-        "mv_barcode",
-        "mv_lot",
         "mv_last_lot",
         "mv_last_barcode",
         "mv_search_by_lot",
@@ -1049,8 +1046,10 @@ def render_tab_move():
     ss.setdefault("mv_search_by_lot", False)
     ss.setdefault("mv_show_stock_detail", False)
     ss.setdefault("mv_show_move_history_here", False)
+    # 🔹 입력칸 버전 (초기화할 때마다 +1 해서 완전 새 위젯 생성)
+    ss.setdefault("mv_input_version", 0)
+    input_ver = ss["mv_input_version"]
 
-    # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
     # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
     with st.form("move_search_form"):
         bulk_type = st.radio(
@@ -1067,13 +1066,13 @@ def render_tab_move():
         with col_in1:
             barcode = st.text_input(
                 barcode_label,
-                key="mv_barcode",
+                key=f"mv_barcode_{input_ver}",
                 placeholder="예: W24012345",
             )
         with col_in2:
             lot_input = st.text_input(
                 "로트번호",
-                key="mv_lot",
+                key=f"mv_lot_{input_ver}",
                 placeholder="예: 2E075K",
             )
 
@@ -1087,6 +1086,7 @@ def render_tab_move():
     # ----- 초기화 버튼 처리 -----
     if reset_submit:
         clear_move_inputs()
+        ss["mv_input_version"] += 1  # 👉 새 버전으로 키 변경 → 입력칸 완전 초기화
         st.rerun()
 
     # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
