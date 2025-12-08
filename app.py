@@ -1312,6 +1312,8 @@ def render_tab_move():
 
     lot_df = lot_df.sort_values("통번호")
 
+    lot_df = lot_df.sort_values("통번호")
+
     loc_unique = lot_df["현재위치"].dropna().unique().tolist()
     if len(loc_unique) == 1:
         current_zone = loc_unique[0]
@@ -1320,22 +1322,26 @@ def render_tab_move():
     else:
         current_zone = "혼합"
 
-        # stock.xlsx 기반 전산 재고 요약
-        stock_loc_display = current_zone  # 기본값 먼저 설정 (에러 방지)
+    # ==============================
+    # stock.xlsx 기반 전산 재고 요약
+    # ==============================
+    # 🔹 기본값을 먼저 current_zone으로 설정 (항상 정의되도록)
+    stock_loc_display = current_zone
 
-        try:
-            stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
-        except Exception:
-            stock_summary_df = None
-            stock_summary_text = ""
+    try:
+        stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
+    except Exception:
+        stock_summary_df = None
+        stock_summary_text = ""
 
-        if stock_summary_df is not None and not stock_summary_df.empty:
-            top = stock_summary_df.iloc[0]
+    if stock_summary_df is not None and not stock_summary_df.empty:
+        top = stock_summary_df.iloc[0]
 
-            qty_int = int(top["실재고수량"]) if pd.notna(top["실재고수량"]) else 0
+        # 실재고수량 정수 변환 (NaN 보호)
+        qty_int = int(top["실재고수량"]) if pd.notna(top["실재고수량"]) else 0
 
-            # 예: 자사(제조실) 10kg
-            stock_loc_display = f"{top['대분류']}({top['창고명']}) {qty_int}kg"
+        # 예: 자사(제조실) 10kg
+        stock_loc_display = f"{top['대분류']}({top['창고명']}) {qty_int}kg"
 
 
     # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
