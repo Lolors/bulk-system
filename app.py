@@ -1616,18 +1616,18 @@ def render_tab_lookup():
         df.to_csv(backup_name, index=False, encoding="utf-8-sig")
         st.success(f"백업 파일로 저장되었습니다: {backup_name}")
 
-if st.button("간단 데이터 점검"):
-    df_all = load_drums()
+    if st.button("간단 데이터 점검"):
+        df_all = load_drums()
 
-    prob1 = df_all[(df_all["통용량"] == 0) & ~df_all["현재위치"].isin(["소진", "폐기"])]
-    if not prob1.empty:
-        st.warning("용량 0인데 소진/폐기가 아닌 통")
-        st.dataframe(prob1, use_container_width=True)
+        prob1 = df_all[(df_all["통용량"] == 0) & ~df_all["현재위치"].isin(["소진", "폐기"])]
+        if not prob1.empty:
+            st.warning("용량 0인데 소진/폐기가 아닌 통")
+            st.dataframe(prob1, use_container_width=True)
 
-    prob2 = df_all[(df_all["현재위치"] == "외주") & (df_all["상태"] != "외주")]
-    if not prob2.empty:
-        st.warning("위치는 외주인데 상태가 외주가 아닌 통")
-        st.dataframe(prob2, use_container_width=True)
+        prob2 = df_all[(df_all["현재위치"] == "외주") & (df_all["상태"] != "외주")]
+        if not prob2.empty:
+            st.warning("위치는 외주인데 상태가 외주가 아닌 통")
+            st.dataframe(prob2, use_container_width=True)
 
 
 # ==============================
