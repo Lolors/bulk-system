@@ -1376,20 +1376,24 @@ def render_tab_move():
 
         st.markdown("### 🛢 통 선택 및 잔량 입력")
 
-        # 🔹 모두 선택 / 모두 해제 버튼을 한 줄에
-        drum_list = lot_df["통번호"].tolist()
-        col_sel1, col_sel2 = st.columns(2)
-        with col_sel1:
-            if st.button("모두 선택", key=f"mv_select_all_{lot}"):
-                for dn in drum_list:
-                    ss[f"mv_sel_{lot}_{dn}"] = True
-        with col_sel2:
-            if st.button("모두 해제", key=f"mv_select_none_{lot}"):
-                for dn in drum_list:
-                    ss[f"mv_sel_{lot}_{dn}"] = False
+        selected_drums = []
+        drum_new_qty = {}
 
-        # 🔹 통 개별 체크 + 잔량 입력
-        for _, row in lot_df.iterrows():
+        # ✅ index 기준으로 key를 만들어서 중복 방지
+        lot_df = lot_df.reset_index(drop=True)
+        index_list = lot_df.index.tolist()
+
+        c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
+        with c1:
+            if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
+                for idx in index_list:
+                    st.session_state[f"mv_sel_{lot}_{idx}"] = True
+        with c2:
+            if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=False):
+                for idx in index_list:
+                    st.session_state[f"mv_sel_{lot}_{idx}"] = False
+
+        for idx, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
             old_qty = float(row["통용량"])
             drum_loc = str(row.get("현재위치", "") or "").strip()
@@ -1399,7 +1403,7 @@ def render_tab_move():
             else:
                 label = f"{drum_no}번 통 — 기존 {old_qty:.0f}kg"
 
-            cb_key = f"mv_sel_{lot}_{drum_no}"
+            cb_key = f"mv_sel_{lot}_{idx}"
             checked = st.checkbox(label, key=cb_key)
             if checked:
                 selected_drums.append(drum_no)
@@ -1410,9 +1414,10 @@ def render_tab_move():
                     value=old_qty,
                     step=10.0,
                     format="%.0f",
-                    key=f"mv_qty_{lot}_{drum_no}",
+                    key=f"mv_qty_{lot}_{drum_no}",  # ⬅️ 이건 그대로 두어도 문제 없음
                 )
                 drum_new_qty[drum_no] = float(new_val)
+
 
     # ===== 오른쪽: 이동 위치 + 상태 + 비고 + 저장 =====
     with col_right2:
