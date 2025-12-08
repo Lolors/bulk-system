@@ -920,88 +920,101 @@ def render_login():
 # ==============================
 def get_stock_summary(item_code: str, lot: str):
     """
-    stock.xlsx에서 해당 품번 + 로트의 전산 재고를 요약해서 반환.
+    stock.xlsx 기반 전산 재고 요약
 
-    - 품번(C열), 로트번호(G열) 일치
-    - 실재고수량(K열) != 0 인 행들만 사용
-    - A열(창고코드) 기준으로 대분류: 자사 / 창고 / 불량 / 외주
-    - 반환값:
-        (상세 DataFrame, "대분류(창고명) 실재고수량kg" 요약 문자열)
+    - 품번(C열) == item_code
+    - 로트번호(G열) == lot
+    - 실재고수량(K열) != 0
+    을 만족하는 행만 모아서,
+    창고코드(A열)를 대분류(자사/창고/불량/외주)로 구분한 요약 테이블을 만든다.
     """
     stock_df = load_stock()
     if stock_df is None or stock_df.empty:
-        return pd.DataFrame(), ""
+        return None, ""
 
-    # 컬럼 이름 매핑 (엑셀 헤더 이름이 약간 달라도 대비)
-    col_code = next((c for c in stock_df.columns if c in ["품번", "품목코드"]), None)
-    col_lot = next((c for c in stock_df.columns if "로트번호" in str(c)), None)
-    col_qty = next((c for c in stock_df.columns if "실재고수량" in str(c)), None)
-    col_loc_code = next(
-        (c for c in stock_df.columns if c in ["창고작업장코드", "창고코드"]), None
+    # 컬럼 이름 후보 (엑셀 헤더에 따라 다를 수 있어서 여러 후보 허용)
+    def pick_col(candidates):
+        for c in candidates:
+            if c in stock_df.columns:
+                return c
+        return None
+
+    col_code = pick_col(["창고코드", "창고작업장코드"])
+    col_name = pick_col(["창고명", "창고/작업장명"])
+    col_item = pick_col(["품번", "품목코드"])
+    col_lot  = pick_col(["로트번호", "LOTNO", "LotNo"])
+    col_qty  = pick_col(["실재고수량", "실재고수량(KG)", "재고수량"])
+
+    # 필수 컬럼 없으면 바로 종료
+    if not all([col_code, col_name, col_item, col_lot, col_qty]):
+        return None, ""
+
+    # --------- 품번 + 로트번호 필터 ---------
+    lot_q  = (lot or "").strip().lower()
+    item_q = (item_code or "").strip().lower()
+
+    if not lot_q or not item_q:
+        return None, ""
+
+    df = stock_df.copy()
+    df[col_lot]  = df[col_lot].astype(str)
+    df[col_item] = df[col_item].astype(str)
+
+    mask = (
+        df[col_lot].str.lower().eq(lot_q)
+        & df[col_item].str.lower().eq(item_q)
     )
-    col_loc_name = next(
-        (c for c in stock_df.columns if c in ["창고/작업장명", "창고명"]), None
-    )
+    df = df[mask].copy()
+    if df.empty:
+        return None, ""
 
-    # 필수 컬럼 없으면 빈 결과
-    if not all([col_code, col_lot, col_qty, col_loc_code, col_loc_name]):
-        return pd.DataFrame(), ""
+    # --------- 실재고수량 > 0만 남기기 ---------
+    df[col_qty] = pd.to_numeric(df[col_qty], errors="coerce").fillna(0)
+    df = df[df[col_qty] != 0]
+    if df.empty:
+        return None, ""
 
-    # 품번 + 로트번호 + 실재고수량 != 0 필터
-    sub = stock_df[
-        (stock_df[col_code].astype(str) == str(item_code))
-        & (stock_df[col_lot].astype(str) == str(lot))
-    ].copy()
-
-    if sub.empty:
-        return pd.DataFrame(), ""
-
-    sub[col_qty] = pd.to_numeric(sub[col_qty], errors="coerce").fillna(0)
-    sub = sub[sub[col_qty] != 0]
-
-    if sub.empty:
-        return pd.DataFrame(), ""
-
-    # 창고코드 → 대분류 분류
+    # --------- 창고코드 → 대분류 매핑 ---------
     def classify_loc(code: str) -> str:
-        s = str(code).strip()
+        code = str(code).strip()
         # 자사
-        if s in ["WC301", "WC501", "WC502", "WC503", "WC504"]:
+        if code in {"WC301", "WC501", "WC502", "WC503", "WC504"}:
             return "자사"
         # 창고
-        if s in ["WH201", "WH701", "WH301", "WH601", "WH401", "WH506"]:
+        if code in {"WH201", "WH701", "WH301", "WH601", "WH401", "WH506"}:
             return "창고"
         # 불량
-        if s in ["WH001", "WH102"]:
+        if code in {"WH001", "WH102"}:
             return "불량"
         # 그 외는 외주
         return "외주"
 
-    sub["대분류"] = sub[col_loc_code].apply(classify_loc)
+    df["대분류"] = df[col_code].astype(str).apply(classify_loc)
 
-    # 보여줄 컬럼 이름 통일
-    sub = sub.rename(
+    # --------- 창고코드/창고명/대분류 단위로 실재고수량 합계 ---------
+    grouped = (
+        df.groupby([col_code, col_name, "대분류"], dropna=False, as_index=False)[col_qty]
+        .sum()
+    )
+
+    # 표에 쓸 표준 컬럼명으로 변경
+    grouped = grouped.rename(
         columns={
-            col_loc_code: "창고코드",
-            col_loc_name: "창고명",
+            col_code: "창고코드",
+            col_name: "창고명",
             col_qty: "실재고수량",
         }
     )
 
-    # 정렬 & 컬럼 순서
-    sub = sub[["창고코드", "창고명", "실재고수량", "대분류"]].copy()
+    if grouped.empty:
+        return grouped, ""
 
-    # 한 줄 요약 텍스트 (첫 행 기준)
-    top = sub.iloc[0]
-    qty_val = top["실재고수량"]
-    try:
-        qty_disp = int(qty_val)
-    except Exception:
-        qty_disp = qty_val
+    # 현재 위치(전산 기준)에 쓸 요약 텍스트 (첫 행 기준)
+    top = grouped.iloc[0]
+    qty_int = int(top["실재고수량"])
+    summary_text = f"{top['대분류']}({top['창고명']}) {qty_int}kg"
 
-    summary_text = f"{top['대분류']}({top['창고명']}) {qty_disp}kg"
-
-    return sub, summary_text
+    return grouped, summary_text
 
 
 # ==============================
@@ -1306,13 +1319,11 @@ def render_tab_move():
 
     # stock.xlsx 기반 전산 재고 요약
     stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
-
     if stock_summary_text:
-        # 예: "창고(부자재창고) 480kg"
+        # 예: 자사(제조실) 10kg, 창고(입하창고) 5kg, 불량(부자재불량창고) 3kg ...
         stock_loc_display = stock_summary_text
     else:
         stock_loc_display = current_zone
-
 
     # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
     selected_drums = []
