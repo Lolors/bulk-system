@@ -1109,8 +1109,7 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        lot = lot_input
-        lot_lower = lot_input.lower()
+        lot_lower = lot_input.upper()
         barcode_used = lot_input
 
     else:
@@ -1137,7 +1136,7 @@ def render_tab_move():
                 return
 
             r = hit.iloc[0]
-            lot = str(r["LOTNO"])
+            lot = str(r["LOTNO"]).strip().upper()
             item_code = str(r["품번"])
             item_name = str(r["품명"])
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
@@ -1182,7 +1181,7 @@ def render_tab_move():
 
             item_code = str(r["품번"])
             item_name = str(r["품명"])
-            lot = str(r["로트번호"])
+            lot = str(r["로트번호"]).strip().upper()
 
             if "입하량" in recv_df.columns:
                 prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
