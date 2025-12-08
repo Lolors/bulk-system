@@ -1185,7 +1185,7 @@ def render_tab_move():
 
             item_code = str(r["품번"])
             item_name = str(r["품명"])
-            lot = str(r["로트번호"]).strip()
+            lot = str(r["로트번호"])
 
             if "입하량" in recv_df.columns:
                 prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
@@ -1199,7 +1199,36 @@ def render_tab_move():
             else:
                 prod_date = ""
 
-            trade_type = str(r.get("유/무상", "")).strip()
+            # ==============================
+            # stock.xlsx 기준으로 유/무상 판단
+            # ==============================
+            line = "사급"  # 기본값
+
+            try:
+                stock_df = load_stock()
+            except Exception:
+                stock_df = pd.DataFrame()
+
+            trade_type = ""
+
+            if not stock_df.empty:
+                # 컬럼명: A=창고/작업장, B=창고/작업장명, C=품번, G=로트번호, K=실재고수량, T=유/무상
+                # → 여기서 C(품번), G(로트번호), T(유/무상) 사용
+                cond = (
+                    stock_df["품번"].astype(str) == item_code
+                ) & (
+                    stock_df["로트번호"].astype(str) == lot
+                )
+
+                sub = stock_df[cond]
+                if not sub.empty and "유/무상" in sub.columns:
+                    # 여러 행이면 첫 행 기준
+                    trade_type = str(sub.iloc[0]["유/무상"]).strip()
+
+            # stock에 값이 없으면 receive의 유/무상을 백업으로 사용
+            if not trade_type:
+                trade_type = str(r.get("유/무상", "")).strip()
+
             if trade_type == "유상":
                 line = "사급(유상)"
             elif trade_type == "무상":
