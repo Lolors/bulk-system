@@ -1320,15 +1320,22 @@ def render_tab_move():
     else:
         current_zone = "혼합"
 
-    # stock.xlsx 기반 전산 재고 요약
-        stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
+        # stock.xlsx 기반 전산 재고 요약
+        stock_loc_display = current_zone  # 기본값 먼저 설정 (에러 방지)
+
+        try:
+            stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
+        except Exception:
+            stock_summary_df = None
+            stock_summary_text = ""
+
         if stock_summary_df is not None and not stock_summary_df.empty:
             top = stock_summary_df.iloc[0]
-            # 예: 자사(제조실) 10kg
+
             qty_int = int(top["실재고수량"]) if pd.notna(top["실재고수량"]) else 0
+
+            # 예: 자사(제조실) 10kg
             stock_loc_display = f"{top['대분류']}({top['창고명']}) {qty_int}kg"
-        else:
-            stock_loc_display = current_zone
 
 
     # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
