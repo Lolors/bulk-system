@@ -1020,12 +1020,10 @@ def get_stock_summary(item_code: str, lot: str):
 def clear_move_inputs():
     ss = st.session_state
 
-    # 입력칸 직접 초기화
-    ss["mv_barcode"] = ""
-    ss["mv_lot"] = ""
-
-    # 나머지 상태 키들도 삭제
+    # 관련 세션 키 삭제만 수행 (대입 X)
     for k in [
+        "mv_barcode",
+        "mv_lot",
         "mv_last_lot",
         "mv_last_barcode",
         "mv_search_by_lot",
