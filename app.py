@@ -1109,8 +1109,11 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        # 🔹 화면/저장용은 항상 대문자
+        # 🔹 화면/저장용 LOT는 항상 대문자로
         lot = lot_input.upper()
+        # 🔹 검색용 비교값은 소문자로 고정
+        lot_lower = lot_input.lower()
+        # 조회 정보에 보여줄 식별값 (사용자가 실제로 입력한 값)
         barcode_used = lot_input
 
     else:
@@ -1137,7 +1140,7 @@ def render_tab_move():
                 return
 
             r = hit.iloc[0]
-            lot = str(r["LOTNO"]).strip().upper()
+            lot = str(r["LOTNO"]).strip()
             item_code = str(r["품번"])
             item_name = str(r["품명"])
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
@@ -1182,7 +1185,7 @@ def render_tab_move():
 
             item_code = str(r["품번"])
             item_name = str(r["품명"])
-            lot = str(r["로트번호"]).strip().upper()
+            lot = str(r["로트번호"]).strip()
 
             if "입하량" in recv_df.columns:
                 prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
