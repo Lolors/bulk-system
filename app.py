@@ -1046,20 +1046,24 @@ def render_tab_move():
     ss.setdefault("mv_search_by_lot", False)
     ss.setdefault("mv_show_stock_detail", False)
     ss.setdefault("mv_show_move_history_here", False)
-    # 🔹 입력칸 버전 (초기화할 때마다 +1 해서 완전 새 위젯 생성)
     ss.setdefault("mv_input_version", 0)
     input_ver = ss["mv_input_version"]
 
+    # 🔹 벌크 구분은 폼 밖에서 즉시 반영되게
+    bulk_type = st.radio(
+        "벌크 구분을 선택해 주세요.",
+        ["자사", "사급"],
+        horizontal=True,
+        key="mv_bulk_type_csv",
+    )
+
     # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
     with st.form("move_search_form"):
-        bulk_type = st.radio(
-            "벌크 구분을 선택해 주세요.",
-            ["자사", "사급"],
-            horizontal=True,
-            key="mv_bulk_type_csv",
+        barcode_label = (
+            "작업번호를 입력해 주세요."
+            if bulk_type == "자사"
+            else "입하번호를 입력해 주세요."
         )
-
-        barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
         # 🔹 입력칸 두 개 나란히
         col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
@@ -1085,8 +1089,8 @@ def render_tab_move():
 
     # ----- 초기화 버튼 처리 -----
     if reset_submit:
-        clear_move_inputs()
-        ss["mv_input_version"] += 1  # 👉 새 버전으로 키 변경 → 입력칸 완전 초기화
+        clear_move_inputs()          # 검색 상태 초기화 (입력칸은 버전으로 리셋)
+        ss["mv_input_version"] += 1  # 👉 새 키로 위젯 재생성 → 값 완전 삭제
         st.rerun()
 
     # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
@@ -1098,7 +1102,7 @@ def render_tab_move():
         ss["mv_last_barcode"] = barcode_val
         ss["mv_search_by_lot"] = bool(lot_val)  # 로트가 있으면 로트 기준 조회
         ss["mv_searched_csv"] = True
-        ss["mv_just_searched"] = True  # 이번에 막 조회함 표시
+        ss["mv_just_searched"] = True
 
     # 🔹 한 번도 조회한 적 없으면 아래는 안 그림
     if not ss.get("mv_searched_csv", False):
