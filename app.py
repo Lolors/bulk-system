@@ -1323,7 +1323,7 @@ def render_tab_move():
         current_zone = "혼합"
 
     # stock.xlsx 기반 전산 재고 요약
-    stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
+    stock_summary_df, _ = get_stock_summary(item_code, lot)
     if stock_summary_df is not None and not stock_summary_df.empty:
         top = stock_summary_df.iloc[0]
         # 예: 자사(스틱,파우치 충포장실) 10kg
@@ -1870,22 +1870,31 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # 현재 페이지 기본값
+    # 현재 페이지가 전체 범위를 벗어나지 않도록 보정
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # 🔹 페이지 슬라이더 (한 줄에 깔끔하게 정렬됨 — 모바일에서도 유지됨)
-    ss["log_page"] = st.slider(
-        "페이지 이동",
-        min_value=1,
-        max_value=total_pages,
-        value=ss["log_page"],
-        step=1,
-        format="%d",
-    )
+    # 페이지네이션 UI (슬라이더 한 줄)
+    colp = st.columns([3])
+    with colp[0]:
+        ss["log_page"] = st.slider(
+            "페이지 선택",
+            min_value=1,
+            max_value=total_pages,
+            value=ss["log_page"],
+            step=1,
+        )
 
-    # 현재 페이지 범위 계산
+    # ✅ 슬라이더 값 확정된 뒤 한 번만 start/end 계산
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
+
+    st.markdown(
+        f"**페이지 {ss['log_page']} / {total_pages}** &nbsp;&nbsp; "
+        f"(총 {total_rows}건, 페이지당 {page_size}건)",
+        unsafe_allow_html=True,
+    )
+
+    # ✅ 해당 구간 데이터만 잘라서 사용
     page_df = df_view.iloc[start:end].copy()
 
     st.markdown(
