@@ -1619,10 +1619,46 @@ def render_tab_lookup():
     if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
 
+    # 🔻 1차: CSV에서 검색 결과 없음 → production.xlsx에서 2차 검색
     if df_view.empty:
-        st.warning("검색 결과가 없습니다.")
+        if not query:
+            st.warning("검색어를 입력해 주세요.")
+            return
+
+        st.warning("bulk_drums_extended.csv 에서는 검색 결과가 없습니다.")
+        prod_df = load_production()
+
+        if prod_df.empty:
+            st.info("production.xlsx 파일에서도 검색할 수 있는 데이터가 없습니다.")
+            return
+
+        q = query.strip()
+
+        # LOTNO(M열) / 품명(K열)에서 부분 일치 검색
+        mask_prod = (
+            prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
+            | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
+        )
+        prod_view = prod_df[mask_prod].copy()
+
+        if prod_view.empty:
+            st.info("production.xlsx 에서도 해당 로트번호/품명에 대한 데이터를 찾지 못했습니다.")
+            return
+
+        st.markdown("#### 📄 production.xlsx 기준 검색 결과")
+
+        # 보여줄 기본 컬럼들
+        show_cols = ["작업번호", "품번", "품명", "LOTNO", "제조량", "작업일자"]
+        show_cols = [c for c in show_cols if c in prod_view.columns]
+
+        st.dataframe(
+            prod_view[show_cols].sort_values("작업일자", ascending=False),
+            use_container_width=True,
+        )
+        st.caption("※ 이 로트는 아직 bulk_drums_extended.csv 에 등록되지 않았을 수 있습니다.")
         return
 
+    # 🔻 여기부터는 CSV에서 검색 결과가 있는 경우 기존 로직 그대로
     st.markdown("#### 📄 행별 상세")
     st.dataframe(df_view, use_container_width=True)
 
@@ -1703,6 +1739,7 @@ def render_tab_lookup():
         if not prob2.empty:
             st.warning("위치는 외주인데 상태가 외주가 아닌 통")
             st.dataframe(prob2, use_container_width=True)
+
 
 
 # ==============================
