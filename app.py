@@ -1109,11 +1109,10 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        # 🔹 화면/저장용 LOT는 항상 대문자로
+        # LOT는 항상 대문자로 저장
         lot = lot_input.upper()
-        # 🔹 검색용 비교값은 소문자로 고정
+        # 검색용 LOT는 소문자로
         lot_lower = lot_input.lower()
-        # 조회 정보에 보여줄 식별값 (사용자가 실제로 입력한 값)
         barcode_used = lot_input
 
     else:
@@ -1124,27 +1123,30 @@ def render_tab_move():
             return
 
         barcode_used = barcode_query
-        q = barcode_query.lower()
+        q = barcode_query.strip().lower()
 
         if bulk_type == "자사":
-            # 🟡 자사: 작업번호 (대소문자 무시)
             if prod_df.empty:
-                st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
+                st.error("production.xlsx 파일을 읽을 수 없어 작업번호 기반 조회 불가합니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            hit = prod_df[prod_df["작업번호"].astype(str).str.lower() == q]
+            prod_df["_작번_norm"] = prod_df["작업번호"].astype(str).str.strip().str.lower()
+            hit = prod_df[prod_df["_작번_norm"] == q]
+
             if hit.empty:
                 st.warning("해당 작업번호를 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
             r = hit.iloc[0]
-            lot = str(r["LOTNO"]).strip()
-            item_code = str(r["품번"])
-            item_name = str(r["품명"])
+
+            lot = str(r["LOTNO"]).strip().upper()
+            lot_lower = lot.lower()
+            item_code = str(r["품번"]).strip()
+            item_name = str(r["품명"]).strip()
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
-            prod_date = str(r["작업일자"])
+            prod_date = "" if pd.isna(r["작업일자"]) else str(r["작업일자"])
             line = classify_product_line(item_code)
 
             df = ensure_lot_in_csv(
@@ -1160,44 +1162,83 @@ def render_tab_move():
             save_drums(df)
 
         else:
-            # 🟡 사급: 입하번호 (대소문자 무시)
+            # 사급
             if recv_df.empty:
-                st.error("receive.xlsx 파일을 찾을 수 없습니다.")
+                st.error("receive.xlsx 파일을 읽을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            if "입하번호" not in recv_df.columns:
-                st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
+            recv_df["_입하_norm"] = recv_df["입하번호"].astype(str).str.strip().str.lower()
+            hit = recv_df[recv_df["_입하_norm"] == q]
 
-            hit = recv_df[recv_df["입하번호"].astype(str).str.lower() == q]
             if hit.empty:
-                st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
+                st.warning("해당 입하번호를 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
             r = hit.iloc[0]
-            if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
-                st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
 
-            item_code = str(r["품번"])
-            item_name = str(r["품명"])
-            lot = str(r["로트번호"])
+            item_code = str(r["품번"]).strip()
+            item_name = str(r["품명"]).strip()
+            lot = str(r["로트번호"]).strip().upper()
+            lot_lower = lot.lower()
 
+            # 입하량 → 제조량처럼 사용
             if "입하량" in recv_df.columns:
                 prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
             else:
                 prod_qty = None
 
+            # 제조일자 계열 처리
             if "제조일자" in recv_df.columns:
                 prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
             elif "제조년월일" in recv_df.columns:
                 prod_date = "" if pd.isna(r["제조년월일"]) else str(r["제조년월일"])
             else:
                 prod_date = ""
+
+            # stock.xlsx에서 유/무상 자동 판단
+            line = "사급"
+            trade_type = ""
+
+            try:
+                stock_df = load_stock()
+            except Exception:
+                stock_df = pd.DataFrame()
+
+            if not stock_df.empty:
+                cond = (
+                    stock_df["품번"].astype(str).str.strip() == item_code
+                ) & (
+                    stock_df["로트번호"].astype(str).str.strip().str.upper() == lot
+                )
+
+                sub = stock_df[cond]
+                if not sub.empty and "유/무상" in sub.columns:
+                    trade_type = str(sub.iloc[0]["유/무상"]).strip()
+
+            # stock에 없으면 receive의 값 사용
+            if not trade_type:
+                trade_type = str(r.get("유/무상", "")).strip()
+
+            if trade_type == "유상":
+                line = "사급(유상)"
+            elif trade_type == "무상":
+                line = "사급(무상)"
+            else:
+                line = "사급"
+
+            df = ensure_lot_in_csv(
+                df,
+                lot=lot,
+                item_code=item_code,
+                item_name=item_name,
+                line=line,
+                mfg_date=prod_date,
+                initial_status="생산대기",
+                prod_qty=prod_qty,
+            )
+            save_drums(df)
 
             # ==============================
             # stock.xlsx 기준으로 유/무상 판단
