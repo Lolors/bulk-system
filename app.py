@@ -1109,10 +1109,12 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        # ✅ 로트는 항상 대문자로 관리
-        lot = lot_input.strip().upper()
-        lot_lower = lot.lower()
-        barcode_used = lot  # 화면에도 대문자로 표시
+        # 🔹 화면/저장용 LOT는 항상 대문자로
+        lot = lot_input.upper()
+        # 🔹 검색용 비교값은 소문자로 고정
+        lot_lower = lot_input.lower()
+        # 조회 정보에 보여줄 식별값 (사용자가 실제로 입력한 값)
+        barcode_used = lot_input
 
     else:
         barcode_query = (ss.get("mv_last_barcode") or "").strip()
@@ -1121,104 +1123,29 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        # 화면에 보여줄 식별값 (그대로 표시)
         barcode_used = barcode_query
-
-        # 비교용 소문자+공백제거 버전
-        q = barcode_query.strip().lower()
+        q = barcode_query.lower()
 
         if bulk_type == "자사":
-            # 🟡 자사: 작업번호 (대소문자 무시 + 앞뒤 공백 제거)
+            # 🟡 자사: 작업번호 (대소문자 무시)
             if prod_df.empty:
                 st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            # 작업번호 정규화 컬럼(앞뒤공백 제거 + 소문자)
-            prod_df["_작번_norm"] = prod_df["작업번호"].astype(str).str.strip().str.lower()
-            hit = prod_df[prod_df["_작번_norm"] == q]
-
+            hit = prod_df[prod_df["작업번호"].astype(str).str.lower() == q]
             if hit.empty:
                 st.warning("해당 작업번호를 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
             r = hit.iloc[0]
-
-            # ✅ B,J,K,M,E열에 해당하는 컬럼들에서 값 가져오기
-            #   - LOTNO 는 항상 대문자로
-            lot = str(r["LOTNO"]).strip().upper()
-            item_code = str(r["품번"]).strip()
-            item_name = str(r["품명"]).strip()
-
-            # 작업일자(E열) → 제조일자
-            prod_date = "" if pd.isna(r["작업일자"]) else str(r["작업일자"])
-
-            # 제품라인(리들샷/페이셜 구분용)
+            lot = str(r["LOTNO"]).strip()
+            item_code = str(r["품번"])
+            item_name = str(r["품명"])
+            prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
+            prod_date = str(r["작업일자"])
             line = classify_product_line(item_code)
-
-            # CSV에 이 로트가 없으면 최초 생성
-            df = ensure_lot_in_csv(
-                df,
-                lot=lot,
-                item_code=item_code,
-                item_name=item_name,
-                line=line,
-                mfg_date=prod_date,
-                initial_status="생산대기",
-                prod_qty=float(r["제조량"]) if not pd.isna(r["제조량"]) else None,
-            )
-            save_drums(df)
-
-        else:
-            # 🟡 사급: 입하번호 (대소문자 무시 + 앞뒤 공백 제거)
-            if recv_df.empty:
-                st.error("receive.xlsx 파일을 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
-
-            if "입하번호" not in recv_df.columns:
-                st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
-
-            recv_df["_입하_norm"] = recv_df["입하번호"].astype(str).str.strip().str.lower()
-            hit = recv_df[recv_df["_입하_norm"] == q]
-
-            if hit.empty:
-                st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
-
-            r = hit.iloc[0]
-            if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
-                st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
-                ss["mv_searched_csv"] = False
-                return
-
-            item_code = str(r["품번"]).strip()
-            item_name = str(r["품명"]).strip()
-            lot = str(r["로트번호"]).strip().upper()  # 사급도 로트는 대문자로
-
-            if "입하량" in recv_df.columns:
-                prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
-            else:
-                prod_qty = None
-
-            if "제조일자" in recv_df.columns:
-                prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
-            elif "제조년월일" in recv_df.columns:
-                prod_date = "" if pd.isna(r["제조년월일"]) else str(r["제조년월일"])
-            else:
-                prod_date = ""
-
-            trade_type = str(r.get("유/무상", "")).strip()
-            if trade_type == "유상":
-                line = "사급(유상)"
-            elif trade_type == "무상":
-                line = "사급(무상)"
-            else:
-                line = "사급"
 
             df = ensure_lot_in_csv(
                 df,
@@ -1232,9 +1159,45 @@ def render_tab_move():
             )
             save_drums(df)
 
-        # 여기서 lot_lower 갱신 (자사/사급 공통)
-        lot_lower = (lot or "").strip().lower()
+        else:
+            # 🟡 사급: 입하번호 (대소문자 무시)
+            if recv_df.empty:
+                st.error("receive.xlsx 파일을 찾을 수 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
 
+            if "입하번호" not in recv_df.columns:
+                st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
+
+            hit = recv_df[recv_df["입하번호"].astype(str).str.lower() == q]
+            if hit.empty:
+                st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
+
+            r = hit.iloc[0]
+            if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
+                st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
+
+            item_code = str(r["품번"])
+            item_name = str(r["품명"])
+            lot = str(r["로트번호"])
+
+            if "입하량" in recv_df.columns:
+                prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
+            else:
+                prod_qty = None
+
+            if "제조일자" in recv_df.columns:
+                prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
+            elif "제조년월일" in recv_df.columns:
+                prod_date = "" if pd.isna(r["제조년월일"]) else str(r["제조년월일"])
+            else:
+                prod_date = ""
 
             # ==============================
             # stock.xlsx 기준으로 유/무상 판단
