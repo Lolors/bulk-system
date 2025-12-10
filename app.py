@@ -19,6 +19,7 @@ USER_ACCOUNTS = {
     "ps": {"password": "0000", "display_name": "임필선"},
     "by": {"password": "0000", "display_name": "강봉연"},
     "hn": {"password": "0000", "display_name": "김한나"},
+    "se": {"password": "0000", "display_name": "이성은"},
 }
 
 # ==============================
