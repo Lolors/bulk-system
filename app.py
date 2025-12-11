@@ -1689,7 +1689,7 @@ def render_tab_lookup():
         # TAT 계산
         drums_df = add_tat_column(drums_df)
 
-        st.markdown("#### 📄 제조실 재고 검색 결과 (가상 벌크통)")
+        st.markdown("#### 📄 제조실 재고 검색 결과")
 
         show_cols = [
             "품목코드",
@@ -1704,9 +1704,16 @@ def render_tab_lookup():
         ]
         show_cols = [c for c in show_cols if c in drums_df.columns]
 
-        st.dataframe(
+        st.data_editor(
             drums_df[show_cols].sort_values(["로트번호", "통번호"]),
             use_container_width=True,
+            hide_index=True,
+            column_config={
+                "품명": st.column_config.TextColumn(
+                    "품명",
+                    width="large",   # 🔥 이게 핵심: 품명 칸을 넓게 확장
+                )
+            }
         )
 
         st.caption(
