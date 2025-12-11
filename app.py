@@ -1649,10 +1649,14 @@ def render_tab_lookup():
             st.info("bulk CSV와 production.xlsx 어디에서도 검색 결과가 없습니다.")
             return
 
-        st.markdown("#### 📄 production.xlsx 기준 검색 결과")
+        st.markdown("#### 📄 제조실 재고 검색 결과")
 
-        # 보여줄 기본 컬럼들
-        show_cols = ["작업번호", "품번", "품명", "LOTNO", "제조량", "작업일자"]
+        # 위치 컬럼 추가 (고정값: 자사(제조실))
+        prod_view = prod_view.copy()
+        prod_view["위치"] = "자사(제조실)"
+
+        # 보여줄 기본 컬럼들 (제조량 오른쪽에 위치 컬럼 배치)
+        show_cols = ["작업번호", "품번", "품명", "LOTNO", "제조량", "위치", "작업일자"]
         show_cols = [c for c in show_cols if c in prod_view.columns]
 
         st.dataframe(
