@@ -1635,7 +1635,7 @@ def render_tab_lookup():
 
         q = query.strip()
 
-        # LOTNO(M열) / 품명(K열)에서 부분 일치 검색
+        # LOTNO / 품명 부분 일치 검색
         mask_prod = (
             prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
             | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
@@ -1646,52 +1646,55 @@ def render_tab_lookup():
             st.info("bulk CSV와 production.xlsx 모두에서 검색 결과가 없습니다.")
             return
 
-        # ===== 여기서부터 production 기반으로 '가상 벌크통' 생성 =====
+        # ===== production 기반 가상 벌크통 생성 =====
         drums_rows = []
 
         for _, r in prod_view.iterrows():
             item_code = str(r["품번"])
             item_name = str(r["품명"])
-            lot = str(r["LOTNO"]).strip()
-            mfg_date = str(r["작업일자"])
+            lot = str(r["LOTNO"]).strip().upper()
+
+            # 제조일자(작업일자)에서 날짜만 추출
+            raw_date = r["작업일자"]
+            try:
+                mfg_date = str(pd.to_datetime(raw_date).date())  # YYYY-MM-DD
+            except Exception:
+                mfg_date = str(raw_date)
+
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
 
-            # 제품라인 자동분류 (이동 탭과 동일 로직)
-            line = classify_product_line(item_code)
-
-            # 제조량을 1000kg 단위로 통번호/통용량 분할 (이동 탭과 동일 로직)
+            # 제조량 → 통번호 자동 생성
             drums = generate_drums(prod_qty)
+
             for d in drums:
                 drums_rows.append(
                     {
                         "품목코드": item_code,
                         "품명": item_name,
-                        "로트번호": lot.upper(),      # 로트번호는 항상 대문자
-                        "제품라인": line or "",
+                        "로트번호": lot,
                         "제조일자": mfg_date,
                         "상태": "생산대기",
                         "통번호": int(d["통번호"]),
                         "통용량": float(d["통용량"]),
-                        "현재위치": "자사(제조실)",   # ← 위치 값, 컬럼명은 현재위치
+                        "현재위치": "자사(제조실)",
                     }
                 )
 
         if not drums_rows:
-            st.info("production.xlsx 에는 검색 결과가 있지만, 제조량 정보가 없어 통 정보를 만들 수 없습니다.")
+            st.info("production.xlsx 에 데이터는 있으나 제조량이 없어 통 생성이 불가능합니다.")
             return
 
         drums_df = pd.DataFrame(drums_rows)
 
-        # CSV와 동일하게 TAT 컬럼 계산
+        # TAT 계산
         drums_df = add_tat_column(drums_df)
 
         st.markdown("#### 📄 제조실 재고 검색 결과 (가상 벌크통)")
 
-        cols_order = [
+        show_cols = [
             "품목코드",
             "품명",
             "로트번호",
-            "제품라인",
             "제조일자",
             "상태",
             "통번호",
@@ -1699,17 +1702,19 @@ def render_tab_lookup():
             "현재위치",
             "TAT",
         ]
-        cols_order = [c for c in cols_order if c in drums_df.columns]
+        show_cols = [c for c in show_cols if c in drums_df.columns]
 
         st.dataframe(
-            drums_df[cols_order].sort_values(["로트번호", "통번호"]),
+            drums_df[show_cols].sort_values(["로트번호", "통번호"]),
             use_container_width=True,
         )
+
         st.caption(
-            "※ 이 통 정보는 production.xlsx를 기준으로 계산한 **가상 벌크통**이며, "
-            "bulk_drums_extended.csv 에 아직 등록되지 않았을 수 있습니다."
+            "※ 이 통 정보는 제조작업실적현황 기반의 정보이며, "
+            "벌크 관리 시스템에 아직 등록되지 않았습니다."
         )
         return
+
 
         # =========================
         # 2차: production.xlsx 에서 검색
