@@ -1619,22 +1619,26 @@ def render_tab_lookup():
     if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
 
-    # 🔻 1차: CSV에서 검색 결과 없음 → production.xlsx에서 2차 검색
+    # =========================
+    # 1차: bulk CSV 에서 검색
+    # =========================
     if df_view.empty:
+        # 검색어가 없으면 production 까지 갈 필요 없음
         if not query:
-            st.warning("검색어를 입력해 주세요.")
+            st.warning("검색 결과가 없습니다.")
             return
 
-        st.warning("bulk_drums_extended.csv 에서는 검색 결과가 없습니다.")
+        # =========================
+        # 2차: production.xlsx 에서 검색
+        # =========================
         prod_df = load_production()
-
         if prod_df.empty:
-            st.info("production.xlsx 파일에서도 검색할 수 있는 데이터가 없습니다.")
+            st.warning("검색 결과가 없습니다.")
             return
 
         q = query.strip()
 
-        # LOTNO(M열) / 품명(K열)에서 부분 일치 검색
+        # LOTNO(M열) / 품명(K열) 기준 부분 일치 검색
         mask_prod = (
             prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
             | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
@@ -1642,7 +1646,7 @@ def render_tab_lookup():
         prod_view = prod_df[mask_prod].copy()
 
         if prod_view.empty:
-            st.info("production.xlsx 에서도 해당 로트번호/품명에 대한 데이터를 찾지 못했습니다.")
+            st.info("bulk CSV와 production.xlsx 어디에서도 검색 결과가 없습니다.")
             return
 
         st.markdown("#### 📄 production.xlsx 기준 검색 결과")
@@ -1739,7 +1743,6 @@ def render_tab_lookup():
         if not prob2.empty:
             st.warning("위치는 외주인데 상태가 외주가 아닌 통")
             st.dataframe(prob2, use_container_width=True)
-
 
 
 # ==============================
