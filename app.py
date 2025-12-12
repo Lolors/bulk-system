@@ -5,7 +5,9 @@ from datetime import datetime, date, timezone, timedelta
 import io
 import math
 import boto3
+import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib import font_manager as fm
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 KST = timezone(timedelta(hours=9))
