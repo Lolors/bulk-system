@@ -2073,6 +2073,7 @@ def render_tab_map():
 # ==============================
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
+
 def render_tab_move_log():
     st.markdown("### 📜 이동 이력 (롤백 전용 / 삭제만 가능)")
 
@@ -2101,9 +2102,10 @@ def render_tab_move_log():
 
     if lot_filter:
         q = lot_filter.strip().lower()
-        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
-        mask = df["lot_lower"].str.contains(q, na=False)
-        df_view = df[mask].copy()
+        df_tmp = df.copy()
+        df_tmp["lot_lower"] = df_tmp["로트번호"].astype(str).str.lower()
+        df_view = df_tmp[df_tmp["lot_lower"].str.contains(q, na=False)].copy()
+        df_view = df_view.drop(columns=["lot_lower"], errors="ignore")
     else:
         df_view = df.copy()
 
@@ -2111,37 +2113,28 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
+    # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
-
-    # 현재 페이지가 전체 범위를 벗어나지 않도록 보정
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # 페이지네이션 UI (슬라이더 한 줄)
-    colp = st.columns([3])
-    with colp[0]:
-        ss["log_page"] = st.slider(
-            "페이지 선택",
-            min_value=1,
-            max_value=total_pages,
-            value=ss["log_page"],
-            step=1,
-        )
+    # 페이지 슬라이더
+    ss["log_page"] = st.slider(
+        "페이지 선택",
+        min_value=1,
+        max_value=total_pages,
+        value=ss["log_page"],
+        step=1,
+        key="log_page_slider",
+    )
 
-    # ✅ 슬라이더 값 확정된 뒤 한 번만 start/end 계산
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
 
-    st.markdown(
-        f"**페이지 {ss['log_page']} / {total_pages}** &nbsp;&nbsp; "
-        f"(총 {total_rows}건, 페이지당 {page_size}건)",
-        unsafe_allow_html=True,
-    )
-
-    # ✅ 해당 구간 데이터만 잘라서 사용
+    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
     page_df = df_view.iloc[start:end].copy()
 
     st.markdown(
@@ -2150,10 +2143,6 @@ def render_tab_move_log():
         f"</div>",
         unsafe_allow_html=True,
     )
-    
-    start = (ss["log_page"] - 1) * page_size
-    end = start + page_size
-    page_df = df_view.iloc[start:end].copy()
 
     cols_order = [
         "시간",
@@ -2168,11 +2157,11 @@ def render_tab_move_log():
         "변경 전 위치",
         "변경 후 위치",
     ]
-    page_df = page_df[cols_order]
+    cols_order = [c for c in cols_order if c in page_df.columns]
+    page_df = page_df[cols_order].copy()
 
     delete_col = "삭제"
-    if delete_col not in page_df.columns:
-        page_df[delete_col] = False
+    page_df[delete_col] = False
 
     st.caption(
         "※ LOG는 수정할 수 없습니다. "
@@ -2181,11 +2170,11 @@ def render_tab_move_log():
         "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다."
     )
 
-    # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
     edited_page = st.data_editor(
         page_df,
         use_container_width=True,
-        disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
+        disabled=cols_order,
+        hide_index=True,
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
@@ -2204,98 +2193,85 @@ def render_tab_move_log():
             pass
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
-    # 🔹 이제는 삭제(롤백) 버튼만 존재
     _, col_delete = st.columns([3, 1])
-
     with col_delete:
         if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
-            try:
-                if delete_col in edited_page.columns:
-                    to_del_idx = edited_page[edited_page[delete_col] == True].index
+            # 1) 선택된 원본 인덱스 추출
+            if delete_col not in edited_page.columns:
+                st.warning("삭제 컬럼이 없습니다.")
+                return
+
+            selected_idx = edited_page.index[edited_page[delete_col] == True].tolist()
+            if not selected_idx:
+                st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
+                return
+
+            # 원본(df) 기준으로 해당 행 데이터 확보
+            # (page_df의 인덱스는 df_view/df의 원본 인덱스 그대로)
+            rows_to_delete = df.loc[selected_idx].copy()
+
+            # 2) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
+            log_all = df.copy()
+            log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
+
+            not_latest = []
+            for idx, row in rows_to_delete.iterrows():
+                lot = str(row.get("로트번호", ""))
+                drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
+
+                mask = (log_all["로트번호"].astype(str) == lot) & (log_all["통번호"] == drum_no)
+                sub = log_all[mask]
+                if sub.empty:
+                    continue
+
+                sub_valid = sub.dropna(subset=["__dt"])
+                if not sub_valid.empty:
+                    last_idx = sub_valid["__dt"].idxmax()
                 else:
-                    to_del_idx = []
+                    last_idx = sub.index.max()
 
-                if len(to_del_idx) == 0:
-                    st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
-                    return
+                if idx != last_idx:
+                    not_latest.append(f"{lot} / 통 {drum_no}")
 
-                # 원본 전체 로그에서 삭제 대상 행 추출
-                rows_to_delete = df.loc[to_del_idx].copy()
+            if not_latest:
+                st.error(
+                    "롤백은 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다.\n"
+                    "다음 항목은 더 새로운 이력이 있어 롤백할 수 없습니다:\n"
+                    + ", ".join(not_latest)
+                )
+                return
 
-                # 1) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
-                log_all = df.copy()
-                log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
+            # 3) 통 정보 CSV 롤백 (통용량/현재위치만)
+            drums_df = load_drums()
+            drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
 
-                not_latest = []
-                for idx, row in rows_to_delete.iterrows():
-                    lot = str(row["로트번호"])
-                    drum_no = int(row["통번호"])
+            for _, row in rows_to_delete.iterrows():
+                lot = str(row.get("로트번호", ""))
+                lot_lower = lot.lower()
+                drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
 
-                    mask = (
-                        log_all["로트번호"].astype(str) == lot
-                    ) & (log_all["통번호"] == drum_no)
-                    sub = log_all[mask]
+                old_qty = float(pd.to_numeric(row.get("변경 전 용량", 0), errors="coerce") or 0)
+                from_loc = str(row.get("변경 전 위치", "") or "").strip()
 
-                    if sub.empty:
-                        continue
+                mask_drum = (drums_df["lot_lower"] == lot_lower) & (drums_df["통번호"] == drum_no)
+                drum_idxs = drums_df.index[mask_drum]
+                if len(drum_idxs) == 0:
+                    continue
 
-                    sub_valid = sub.dropna(subset=["__dt"])
-                    if not sub_valid.empty:
-                        last_idx = sub_valid["__dt"].idxmax()
-                    else:
-                        # 시간 파싱이 안 되면, 인덱스 기준으로 가장 큰 값 = 마지막
-                        last_idx = sub.index.max()
+                i = drum_idxs[0]
+                drums_df.at[i, "통용량"] = old_qty
+                if from_loc:
+                    drums_df.at[i, "현재위치"] = from_loc
 
-                    if idx != last_idx:
-                        not_latest.append(f"{lot} / 통 {drum_no}")
+            drums_df = drums_df.drop(columns=["lot_lower"], errors="ignore")
+            save_drums(drums_df)
 
-                if not_latest:
-                    st.error(
-                        "롤백은 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다.\n"
-                        "다음 항목은 더 새로운 이력이 있어 롤백할 수 없습니다:\n"
-                        + ", ".join(not_latest)
-                    )
-                    return
+            # 4) 이동 로그에서 행 삭제 + 저장
+            df_updated = df.drop(index=selected_idx)
+            _save_full_log(df_updated)
 
-                # 2) 통 정보 CSV 롤백
-                drums_df = load_drums()
-                drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
-
-                for _, row in rows_to_delete.iterrows():
-                    lot = str(row["로트번호"])
-                    lot_lower = lot.lower()
-                    drum_no = int(row["통번호"])
-
-                    old_qty = float(row["변경 전 용량"])
-                    from_loc = str(row["변경 전 위치"]) if not pd.isna(row["변경 전 위치"]) else ""
-
-                    mask_drum = (drums_df["lot_lower"] == lot_lower) & (drums_df["통번호"] == drum_no)
-                    drum_idxs = drums_df.index[mask_drum]
-
-                    if len(drum_idxs) == 0:
-                        # 해당 통 정보가 CSV에 없으면 스킵
-                        continue
-
-                    i = drum_idxs[0]
-                    drums_df.at[i, "통용량"] = old_qty
-                    if from_loc:
-                        drums_df.at[i, "현재위치"] = from_loc
-                    # 상태까지 완벽히 복원하려면 로그에 상태를 추가로 기록해야 함.
-                    # 지금은 통용량/현재위치만 롤백.
-
-                if "lot_lower" in drums_df.columns:
-                    drums_df = drums_df.drop(columns=["lot_lower"])
-                save_drums(drums_df)
-
-                # 3) 이동 로그에서 행 삭제 + 저장
-                df_updated = df.drop(index=to_del_idx)
-                _save_full_log(df_updated)
-
-                st.success(f"총 {len(to_del_idx)}개 이동 이력이 삭제되고, 관련 통 정보가 롤백되었습니다.")
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"행을 삭제(롤백)하는 중 오류가 발생했습니다: {e}")
+            st.success(f"총 {len(selected_idx)}개 이동 이력이 삭제되고, 관련 통 정보가 롤백되었습니다.")
+            st.rerun()
 
 # ==============================
 # 탭 5: 데이터 파일 관리
