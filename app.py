@@ -2140,6 +2140,10 @@ def render_tab_move_log():
             value=ss["log_page"],
             step=1,
         )
+   
+    # ✅ 슬라이더 값 확정된 뒤 한 번만 start/end 계산
+    start = (ss["log_page"] - 1) * page_size
+    end = start + page_size
 
     # ✅ 해당 구간 데이터만 잘라서 사용
     page_df = df_view.iloc[start:end].copy()
