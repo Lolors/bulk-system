@@ -1585,13 +1585,13 @@ def render_tab_move():
         note = st.text_area("비고(선택 입력)", height=80, key="mv_note_csv")
 
 
-            if sel_floor in ["창고", "소진", "폐기", "외주"]:
-                to_zone = sel_floor
-            else:
-                z = (sel_zone or "").strip()
-                if not z:
-                    z = "미지정"
-                to_zone = f"{sel_floor} {z}"
+        if sel_floor in ["창고", "소진", "폐기", "외주"]:
+            to_zone = sel_floor
+        else:
+            z = (sel_zone or "").strip()
+             if not z:
+                 z = "미지정"
+            to_zone = f"{sel_floor} {z}"
 
         if to_zone == "외주":
             move_status = "외주"
