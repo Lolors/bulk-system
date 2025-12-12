@@ -15,7 +15,7 @@ def now_kst_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
 def set_korean_font():
-    font_path = "font/maulgun.ttf"  # ✅ GitHub 경로 그대로
+    font_path = "bulk-system/font/maulgun.ttf"  # ✅ GitHub 경로 그대로
     if os.path.exists(font_path):
         fm.fontManager.addfont(font_path)
         font_name = fm.FontProperties(fname=font_path).get_name()
