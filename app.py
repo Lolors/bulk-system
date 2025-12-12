@@ -29,6 +29,93 @@ def set_korean_font():
 
     plt.rcParams["font.family"] = font_name
     plt.rcParams["axes.unicode_minus"] = False
+
+def df_to_png_bytes_landscape(
+    df: pd.DataFrame,
+    title: str = "",
+    wrap_col: str = "품명",
+    max_wrap: int = 28,
+) -> bytes:
+    """
+    이동이력 표 전용 PNG (가로형)
+    - 품명: 가장 넓게
+    - 통번호/용량/변화량: 최소 폭
+    - 모바일 가로모드 1폭 목표
+    """
+
+    # ✅ 한글 폰트 적용
+    set_korean_font()
+
+    # 안전 복사
+    df = df.copy().fillna("").astype(str)
+
+    # ✅ 품명만 줄바꿈
+    if wrap_col in df.columns and max_wrap > 0:
+        df[wrap_col] = df[wrap_col].apply(
+            lambda s: "\n".join(textwrap.wrap(s, width=max_wrap)) if s.strip() else ""
+        )
+
+    n_rows, n_cols = df.shape
+
+    # ---- 가로형 사이즈 계산 ----
+    fig_w = max(14, n_cols * 1.6)     # 🔹 가로 넉넉히
+    fig_h = min(0.42 * (n_rows + 1), 16)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
+    ax.axis("off")
+
+    if title:
+        ax.set_title(title, fontsize=13, pad=12)
+
+    table = ax.table(
+        cellText=df.values,
+        colLabels=df.columns.tolist(),
+        cellLoc="center",
+        colLoc="center",
+        loc="center",
+    )
+
+    # ---- 기본 폰트 ----
+    table.auto_set_font_size(False)
+    table.set_fontsize(8.5)
+    table.scale(1.0, 1.25)
+
+    # ---- 컬럼별 폭 조절 ----
+    narrow_cols = {
+        "통번호": 0.5,
+        "변경 전 용량": 0.7,
+        "변경 후 용량": 0.7,
+        "변화량": 0.7,
+    }
+
+    wide_cols = {
+        "품명": 2.4,
+    }
+
+    for (r, c), cell in table.get_celld().items():
+        col_name = df.columns[c]
+
+        # 헤더 스타일
+        if r == 0:
+            cell.set_text_props(weight="bold")
+            cell.set_height(cell.get_height() * 1.15)
+
+        # 폭 조절
+        if col_name in narrow_cols:
+            cell.set_width(narrow_cols[col_name])
+        elif col_name in wide_cols:
+            cell.set_width(wide_cols[col_name])
+        else:
+            cell.set_width(1.0)
+
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    canvas = FigureCanvas(fig)
+    canvas.print_png(buf)
+    plt.close(fig)
+
+    return buf.getvalue()
     
 # ==============================
 # 사용자 계정 (로그인용)
@@ -2317,35 +2404,33 @@ def render_tab_move_log():
         "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다."
     )
 
-    # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
-    edited_page = st.data_editor(
-        page_df,
-        use_container_width=True,
-        disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
-        column_config={
-            delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
-        },
-        key=f"move_log_editor_page_{ss['log_page']}",
-    )
+# 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
+edited_page = st.data_editor(
+    page_df,
+    use_container_width=True,
+    disabled=cols_order,
+    column_config={
+        delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
+    },
+    key=f"move_log_editor_page_{ss['log_page']}",
+)
 
-    # ==============================
-    # 📸 이동이력 표 PNG 저장 (현재 페이지, '삭제' 컬럼 제외)
-    # ==============================
-    export_df = page_df.drop(columns=["삭제"], errors="ignore")
+# ==============================
+# 📸 이동이력 PNG 저장
+# ==============================
+export_df = page_df.drop(columns=[delete_col], errors="ignore")
 
-    png_bytes = df_to_png_bytes_landscape(
-        export_df,
-        title=f"이동이력 (페이지 {ss['log_page']} / {total_pages})",
-        wrap_col="품명",
-        max_wrap=30,
-    )
+png_bytes = df_to_png_bytes_landscape(
+    export_df,
+    title=f"이동이력 (페이지 {ss['log_page']} / {total_pages})",
+)
 
-    st.download_button(
-        "📸 현재 페이지 이동이력 PNG 저장",
-        data=png_bytes,
-        file_name=f"move_log_page_{ss['log_page']}.png",
-        mime="image/png",
-    )
+st.download_button(
+    "📸 현재 페이지를 이미지(PNG)로 저장",
+    data=png_bytes,
+    file_name=f"move_log_page_{ss['log_page']}.png",
+    mime="image/png",
+))
 
 
     def _save_full_log(df_updated: pd.DataFrame):
