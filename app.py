@@ -2234,8 +2234,26 @@ def render_tab_move_log():
         use_container_width=True,
         disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
-            delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
-            "품명": st.column_config.TextColumn("품명", width="large"),
+            delete_col: st.column_config.CheckboxColumn(
+                "삭제",
+                help="롤백할 행에 체크",
+            ),
+            "품명": st.column_config.TextColumn(
+                "품명",
+                width="large",
+            ),
+            "통번호": st.column_config.NumberColumn(
+                "통번호",
+                width="small",
+            ),
+            "변경 전 용량": st.column_config.NumberColumn(
+                "변경 전 용량",
+                width="small",
+            ),
+            "변경 후 용량": st.column_config.NumberColumn(
+                "변경 후 용량",
+                width="small",
+            ),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
