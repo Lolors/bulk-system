@@ -301,98 +301,82 @@ def save_drums(df: pd.DataFrame):
 def df_to_png_bytes_landscape(
     df: pd.DataFrame,
     title: str = "",
-    wrap_col: str = "품명",
-    max_wrap: int = 28,   # 품명 줄바꿈 기준(너무 작으면 줄이 너무 많아짐)
 ) -> bytes:
     """
-    DataFrame을 '가로(landscape) PNG'로 변환해서 bytes로 반환.
-    - 품명 컬럼을 가장 넓게
-    - 통번호/용량/변화량 등 숫자 컬럼은 최소폭
+    이동이력 전용 PNG (가로형)
+    - 품명: 최대 폭
+    - 통번호/용량/변화량: 최소 폭
     """
-
     df = df.copy().fillna("").astype(str)
 
-    # 🔹 품명 줄바꿈(선택)
-    if wrap_col in df.columns:
-        df[wrap_col] = df[wrap_col].fillna("").astype(str).apply(
-            lambda s: "\n".join(textwrap.wrap(s, width=max_wrap)) if s.strip() else ""
-        )
-
-    cols = df.columns.tolist()
     n_rows, n_cols = df.shape
 
-    # ---------------------------
-    # 1) 컬럼별 "가중치"로 너비 배분
-    #    (합이 1.0이 되도록 정규화)
-    # ---------------------------
-    weights = {}
-    for c in cols:
-        if c == "품명":
-            weights[c] = 6.0     # ✅ 제일 넓게
-        elif c in ["변경 전 위치", "변경 후 위치", "로트번호", "품번"]:
-            weights[c] = 2.0
-        elif c in ["시간", "ID"]:
-            weights[c] = 1.6
-        elif c in ["통번호", "변경 전 용량", "변경 후 용량", "변화량"]:
-            weights[c] = 0.9     # ✅ 값만 보일 정도로 좁게
-        else:
-            weights[c] = 1.2
+    # =========================
+    # 1️⃣ 컬럼별 폭 가중치
+    # =========================
+    col_weights = {
+        "품명": 4.5,              # 🔥 제일 넓게
+        "변경 전 위치": 2.2,
+        "변경 후 위치": 2.2,
+        "시간": 1.8,
+        "로트번호": 1.4,
+        "품번": 1.2,
 
-    total_w = sum(weights.values())
-    col_widths = [weights[c] / total_w for c in cols]  # 0~1 비율
+        # 숫자/짧은 컬럼들 (최소)
+        "통번호": 0.7,
+        "변경 전 용량": 0.9,
+        "변경 후 용량": 0.9,
+        "변화량": 0.8,
+        "ID": 0.8,
+    }
 
-    # ---------------------------
-    # 2) "가로" 캔버스 크기 잡기
-    # ---------------------------
-    # 가로는 넉넉히, 세로는 행 수에 따라만 늘리되 너무 길어지지 않게 제한
-    fig_w = 16  # ✅ 가로 PNG 느낌 (필요하면 18~22로 키워도 됨)
-    fig_h = max(3.0, min(0.32 * (n_rows + 2), 10.0))  # 행 많아도 너무 길어지지 않게
+    weights = [col_weights.get(c, 1.0) for c in df.columns]
+    total_weight = sum(weights)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=220)
+    # =========================
+    # 2️⃣ 그림 크기 (가로형 고정)
+    # =========================
+    fig_w = max(14, total_weight * 1.1)   # 가로 넉넉
+    fig_h = min(0.45 * (n_rows + 2), 18)  # 세로 제한
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
     ax.axis("off")
 
     if title:
-        ax.set_title(title, fontsize=12, pad=10)
+        ax.set_title(title, fontsize=12, pad=12)
 
-    # ---------------------------
-    # 3) 표 생성
-    # ---------------------------
     table = ax.table(
         cellText=df.values,
-        colLabels=cols,
+        colLabels=df.columns.tolist(),
+        loc="center",
         cellLoc="center",
         colLoc="center",
-        loc="upper left",
     )
 
-    # 폰트/스케일(모바일 한 폭 목표)
+    # =========================
+    # 3️⃣ 폰트 / 스케일
+    # =========================
     table.auto_set_font_size(False)
     table.set_fontsize(8)
-    table.scale(1.0, 1.25)
 
-    # ---------------------------
-    # 4) 🔥 컬럼별 너비 강제 적용
-    # ---------------------------
-    for c_idx, w in enumerate(col_widths):
-        for r_idx in range(0, n_rows + 1):  # 헤더 포함(+1)
-            cell = table[(r_idx, c_idx)]
-            cell.set_width(w)
+    # =========================
+    # 4️⃣ ⭐ 컬럼별 폭 직접 지정
+    # =========================
+    for col_idx, w in enumerate(weights):
+        for row_idx in range(n_rows + 1):  # +1 헤더 포함
+            cell = table[row_idx, col_idx]
+            cell.set_width(w / total_weight)
 
-    # 헤더 스타일
+    # 헤더 강조
     for (r, c), cell in table.get_celld().items():
         if r == 0:
             cell.set_text_props(weight="bold")
             cell.set_height(cell.get_height() * 1.15)
 
-        # 품명은 좌측 정렬이 보기 좋음
-        if cols[c] == "품명":
-            cell.get_text().set_ha("left")
-
-    fig.tight_layout(pad=0.6)
+    fig.tight_layout()
 
     buf = io.BytesIO()
-    canvas = FigureCanvas(fig)
-    canvas.print_png(buf)
+    FigureCanvas(fig).print_png(buf)
     plt.close(fig)
     return buf.getvalue()
 
