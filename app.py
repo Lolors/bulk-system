@@ -1085,7 +1085,7 @@ def render_tab_move():
         )
 
         # 🔹 입력칸 두 개 나란히
-        col_in1, col_in2, _sp = st.columns([0.7, 0.7, 2.5])
+        col_in1, col_in2, _sp = st.columns([1, 1, 2.5])
         with col_in1:
             barcode = st.text_input(
                 barcode_label,
