@@ -291,6 +291,7 @@ def save_drums(df: pd.DataFrame):
 
 
 def df_to_png_bytes(df: pd.DataFrame, title: str = "") -> bytes:
+    set_korean_font()
     """
     DataFrame을 표 이미지(PNG)로 변환해서 bytes로 반환.
     - 모바일에서 '다운로드' 후 사진/파일로 저장 가능
