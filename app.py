@@ -2352,26 +2352,7 @@ def render_tab_move_log():
         file_name=f"move_log_page_{ss['log_page']}.png",
         mime="image/png",
     )
-    
-    # =========================
-    # ✅ 현재 페이지 표만 이미지(PNG)로 저장 (삭제 컬럼 제외)
-    # =========================
-    export_df = page_df.copy()
-    if delete_col in export_df.columns:
-        export_df = export_df.drop(columns=[delete_col])
 
-    png_bytes = df_to_png_bytes(
-        export_df,
-        title=f"이동이력 (페이지 {ss['log_page']} / {total_pages})"
-    )
-
-    st.download_button(
-        "📸 현재 표(PNG)로 저장",
-        data=png_bytes,
-        file_name=f"move_log_page_{ss['log_page']}.png",
-        mime="image/png",
-        use_container_width=True,
-    )
 
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
