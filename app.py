@@ -5,6 +5,8 @@ from datetime import datetime, date, timezone, timedelta
 import io
 import math
 import boto3
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 KST = timezone(timedelta(hours=9))
 
@@ -278,6 +280,59 @@ def save_drums(df: pd.DataFrame):
 
     # 3) S3 업로드
     s3_upload_bytes(CSV_PATH, data)
+
+
+def df_to_png_bytes(df: pd.DataFrame, title: str = "") -> bytes:
+    """
+    DataFrame을 표 이미지(PNG)로 변환해서 bytes로 반환.
+    - 모바일에서 '다운로드' 후 사진/파일로 저장 가능
+    """
+    # df가 너무 크면 렌더링이 무거워질 수 있어서 안전장치
+    df = df.copy()
+
+    # 문자열로 변환(줄바꿈/NaN 처리)
+    df = df.fillna("").astype(str)
+
+    n_rows, n_cols = df.shape
+
+    # ---- 그림 크기 자동 계산 (대충 보기 좋게) ----
+    # 컬럼 수 많으면 가로 넓게, 행 수 많으면 세로 길게
+    fig_w = max(10, n_cols * 1.2)
+    fig_h = max(2.5, min(0.45 * (n_rows + 1), 20))
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
+    ax.axis("off")
+
+    if title:
+        ax.set_title(title, fontsize=12, pad=12)
+
+    table = ax.table(
+        cellText=df.values,
+        colLabels=df.columns.tolist(),
+        cellLoc="center",
+        colLoc="center",
+        loc="center",
+    )
+
+    # 폰트/스케일 조정(모바일 한 폭 목표)
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+    table.scale(1.0, 1.2)
+
+    # 헤더만 조금 진하게
+    for (r, c), cell in table.get_celld().items():
+        if r == 0:
+            cell.set_text_props(weight="bold")
+            cell.set_height(cell.get_height() * 1.15)
+
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    canvas = FigureCanvas(fig)
+    canvas.print_png(buf)
+    plt.close(fig)
+    return buf.getvalue()
+
 
 # ==============================
 # 위치 카테고리 (지도/이동 공통)
@@ -2215,6 +2270,26 @@ def render_tab_move_log():
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
+    )
+    
+    # =========================
+    # ✅ 현재 페이지 표만 이미지(PNG)로 저장 (삭제 컬럼 제외)
+    # =========================
+    export_df = page_df.copy()
+    if delete_col in export_df.columns:
+        export_df = export_df.drop(columns=[delete_col])
+
+    png_bytes = df_to_png_bytes(
+        export_df,
+        title=f"이동이력 (페이지 {ss['log_page']} / {total_pages})"
+    )
+
+    st.download_button(
+        "📸 현재 표(PNG)로 저장",
+        data=png_bytes,
+        file_name=f"move_log_page_{ss['log_page']}.png",
+        mime="image/png",
+        use_container_width=True,
     )
 
     def _save_full_log(df_updated: pd.DataFrame):
