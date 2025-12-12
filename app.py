@@ -1100,7 +1100,7 @@ def render_tab_move():
             )
 
         # 🔹 조회하기 / 초기화 버튼 한 줄
-        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
+        col_b1, col_b2, _sp2 = st.columns([1, 1, 5])
         with col_b1:
             search_submit = st.form_submit_button("조회하기", use_container_width=True)
         with col_b2:
