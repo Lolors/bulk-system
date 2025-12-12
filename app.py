@@ -69,8 +69,8 @@ st.markdown(
     .ag-theme-streamlit .ag-cell[col-id="로트번호"],
     .ag-theme-streamlit .ag-header-cell[col-id="품번"],
     .ag-theme-streamlit .ag-cell[col-id="품번"] {
-        flex: 1 1 140px !important;
-        min-width: 140px !important;
+        flex: 1 1 80px !important;
+        min-width: 80px !important;
     }
     </style>
     """,
