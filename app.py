@@ -1862,15 +1862,38 @@ def render_tab_map():
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
 
-    def get_floor(loc: str) -> str:
+    # -----------------------------
+    # (1) 현재위치 파싱: 층 / 세부구역
+    # -----------------------------
+    def parse_loc(loc) -> tuple[str, str]:
+        """
+        return: (floor, zone)
+        - "4층 로타리" -> ("4층", "로타리")
+        - "5층 미지정" -> ("5층", "미지정")
+        - "외주" -> ("외주", "")
+        - "4층" -> ("4층", "미지정")  # 보험 처리
+        """
         if pd.isna(loc):
-            return ""
+            return ("", "")
         s = str(loc).strip()
-        if "-" in s:
-            return s.split("-")[0]
-        return s
+        if not s:
+            return ("", "")
 
-    df["층"] = df["현재위치"].apply(get_floor)
+        # 특수 상태
+        if s in ("외주", "폐기", "소진"):
+            return (s, "")
+
+        parts = s.split(" ", 1)
+        if len(parts) == 1:
+            # "4층" 같이 층만 들어온 경우
+            return (parts[0], "미지정")
+
+        floor, zone = parts[0].strip(), parts[1].strip()
+        if not zone:
+            zone = "미지정"
+        return (floor, zone)
+
+    df[["층", "세부구역"]] = df["현재위치"].apply(lambda x: pd.Series(parse_loc(x)))
 
     floors = (
         df["층"]
@@ -1883,7 +1906,7 @@ def render_tab_map():
     )
     floors = sorted(floors)
 
-    # 1층 제거
+    # (기존 로직 유지) 1층 제거
     floors = [f for f in floors if f != "1층"]
 
     if not floors:
@@ -1897,8 +1920,10 @@ def render_tab_map():
         st.info("해당 층/구역에 등록된 벌크가 없습니다.")
         return
 
-    # 소진 / 미지정 / 폐기 / 외주 / 창고 는 단일 구역으로 처리
-    special_floors = {"소진", "미지정", "폐기", "외주", "창고"}
+    # -----------------------------
+    # (2) 특수 구역: 외주/폐기/소진
+    # -----------------------------
+    special_floors = {"외주", "폐기", "소진"}
     if sel_floor in special_floors:
         st.markdown(f"#### {sel_floor} 구역 현황")
 
@@ -1912,15 +1937,8 @@ def render_tab_map():
         st.markdown("### 🔍 상세 목록")
 
         show_cols = [
-            "품목코드",
-            "품명",
-            "로트번호",
-            "제품라인",
-            "제조일자",
-            "상태",
-            "현재위치",
-            "통번호",
-            "통용량",
+            "품목코드", "품명", "로트번호", "제품라인", "제조일자",
+            "상태", "현재위치", "통번호", "통용량",
         ]
         st.dataframe(
             fdf[show_cols].sort_values(["로트번호", "통번호"]),
@@ -1928,27 +1946,34 @@ def render_tab_map():
         )
         return
 
-    def get_zone_label(loc: str) -> str:
-        if pd.isna(loc):
-            return ""
-        s = str(loc).strip()
-        if "-" in s:
-            return s.split("-")[1]
-        if s in ["2층", "4층", "5층", "6층"]:
-            return "A1"
-        return s
+    # -----------------------------
+    # (3) 층별 세부구역 정의 (새 지도 구조)
+    # -----------------------------
+    floor_zones = {
+        "2층": ["A", "B", "C", "D", "E", "미지정"],
+        "4층": ["블리스터", "로타리", "덕용", "미지정"],
+        "5층": ["기초", "덕용", "미지정"],
+        "6층": ["스틱&파우치", "스킨팩", "미지정"],
+    }
 
-    fdf["zone_label"] = fdf["현재위치"].apply(get_zone_label)
+    zones = floor_zones.get(sel_floor)
+    if not zones:
+        st.info("이 층은 아직 세부구역 정의가 없습니다. (코드의 floor_zones에 추가해 주세요.)")
+        return
 
-    labels_all = [f"{r}{c}" for r in ["A", "B", "C"] for c in [1, 2, 3]]
+    # 세부구역이 정의에 없으면 "미지정"으로 흡수 (안전망)
+    fdf["zone_label"] = fdf["세부구역"].apply(lambda z: z if z in zones else "미지정")
 
+    # -----------------------------
+    # (4) Zone별 집계 + 버튼 UI
+    # -----------------------------
     zone_stats = {}
     max_vol = 0.0
-    for label in labels_all:
-        sub = fdf[fdf["zone_label"] == label]
+    for z in zones:
+        sub = fdf[fdf["zone_label"] == z]
         drums = len(sub)
         vol = sub["통용량"].sum()
-        zone_stats[label] = {"drums": drums, "volume": vol}
+        zone_stats[z] = {"drums": drums, "volume": vol}
         max_vol = max(max_vol, vol)
 
     def badge(volume):
@@ -1964,52 +1989,59 @@ def render_tab_map():
         else:
             return "🟡"
 
-    st.markdown(f"#### {sel_floor} Zone별 현황 (통 개수 / 총 용량)")
+    st.markdown(f"#### {sel_floor} 구역별 현황 (통 개수 / 총 용량)")
 
-    for row in ["A", "B", "C"]:
-        cols = st.columns(3)
-        for i, col in enumerate(cols):
-            label = f"{row}{i+1}"
-            info = zone_stats.get(label, {"drums": 0, "volume": 0})
+    # 버튼을 보기 좋게 N열로 배치 (2층은 3열, 나머진 2~3열)
+    ncols = 3 if sel_floor == "2층" else 3
+    rows = [zones[i:i+ncols] for i in range(0, len(zones), ncols)]
+
+    for r_idx, row_zones in enumerate(rows):
+        cols = st.columns(ncols)
+        for c_idx in range(ncols):
+            col = cols[c_idx]
+            if c_idx >= len(row_zones):
+                col.empty()
+                continue
+
+            z = row_zones[c_idx]
+            info = zone_stats.get(z, {"drums": 0, "volume": 0})
             txt = (
-                f"{label} {badge(info['volume'])}\n"
+                f"{z} {badge(info['volume'])}\n"
                 f"{info['drums']}통 / {int(info['volume'])}kg"
             )
-            if col.button(txt, key=f"map_btn_{sel_floor}_{label}"):
-                st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
+            if col.button(txt, key=f"map_btn_{sel_floor}_{z}_{r_idx}_{c_idx}"):
+                st.session_state["clicked_zone_csv"] = f"{sel_floor}|{z}"
 
     st.markdown("---")
-    st.markdown("### 🔍 Zone 상세 보기")
+    st.markdown("### 🔍 구역 상세 보기")
 
     clicked = st.session_state.get("clicked_zone_csv", None)
     if not clicked:
-        st.info("확인하실 Zone 버튼을 눌러 주세요.")
+        st.info("확인하실 구역 버튼을 눌러 주세요.")
         return
 
-    st.success(f"선택된 Zone: {clicked}")
-    _, cz_label = clicked.split("-")
+    cfloor, cz = clicked.split("|", 1)
+    if cfloor != sel_floor:
+        # 다른 층에서 누른 버튼이 남아있을 수 있으니 정리
+        st.session_state["clicked_zone_csv"] = None
+        st.info("확인하실 구역 버튼을 다시 눌러 주세요.")
+        return
 
-    ddf = fdf[fdf["zone_label"] == cz_label].copy()
+    st.success(f"선택된 구역: {sel_floor} {cz}")
+
+    ddf = fdf[fdf["zone_label"] == cz].copy()
     if ddf.empty:
-        st.info("해당 Zone에는 벌크가 없습니다.")
+        st.info("해당 구역에는 벌크가 없습니다.")
         return
 
     show_cols = [
-        "품목코드",
-        "품명",
-        "로트번호",
-        "제품라인",
-        "제조일자",
-        "상태",
-        "현재위치",
-        "통번호",
-        "통용량",
+        "품목코드", "품명", "로트번호", "제품라인", "제조일자",
+        "상태", "현재위치", "통번호", "통용량",
     ]
     st.dataframe(
         ddf[show_cols].sort_values(["로트번호", "통번호"]),
         use_container_width=True,
     )
-
 
 # ==============================
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
