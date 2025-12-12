@@ -1743,10 +1743,20 @@ def render_tab_lookup():
             use_container_width=True,
             hide_index=True,
             column_config={
+                "품목코드": st.column_config.TextColumn("품목코드", width="small"),
+                "로트번호": st.column_config.TextColumn("로트번호", width="small"),
+                "제조일자": st.column_config.TextColumn("제조일자", width="small"),
+                "상태": st.column_config.TextColumn("상태", width="small"),
+                "통번호": st.column_config.NumberColumn("통번호", width="small"),
+                "통용량": st.column_config.NumberColumn("통용량", width="small"),
+                "현재위치": st.column_config.TextColumn("현재위치", width="small"),
+                "TAT": st.column_config.NumberColumn("TAT", width="small"),
+
+                # ✅ 품명에 최대 폭 몰아주기
                 "품명": st.column_config.TextColumn(
                     "품명",
-                    width="large",   # 🔥 이게 핵심: 품명 칸을 넓게 확장
-                )
+                    width="large",
+                ),
             },
         )
 
