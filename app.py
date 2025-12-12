@@ -52,6 +52,31 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    """
+    <style>
+    /* ✅ data_editor(ag-grid)에서 '품명' 컬럼 폭 강제 확장 */
+    .ag-theme-streamlit .ag-header-cell[col-id="품명"],
+    .ag-theme-streamlit .ag-cell[col-id="품명"] {
+        flex: 3 1 520px !important;   /* 품명은 크게 */
+        min-width: 520px !important;
+    }
+
+    /* 나머지 텍스트 컬럼은 너무 커지지 않게 눌러주기(선택) */
+    .ag-theme-streamlit .ag-header-cell[col-id="시간"],
+    .ag-theme-streamlit .ag-cell[col-id="시간"],
+    .ag-theme-streamlit .ag-header-cell[col-id="로트번호"],
+    .ag-theme-streamlit .ag-cell[col-id="로트번호"],
+    .ag-theme-streamlit .ag-header-cell[col-id="품번"],
+    .ag-theme-streamlit .ag-cell[col-id="품번"] {
+        flex: 1 1 140px !important;
+        min-width: 140px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
