@@ -17,12 +17,17 @@ def now_kst_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
 def set_korean_font():
-    font_path = "font/maulgun.ttf"  # ✅ GitHub 경로 그대로
-    if os.path.exists(font_path):
-        fm.fontManager.addfont(font_path)
-        font_name = fm.FontProperties(fname=font_path).get_name()
-        matplotlib.rcParams["font.family"] = font_name
-    matplotlib.rcParams["axes.unicode_minus"] = False
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    font_path = os.path.join(BASE_DIR, "font", "malgun.ttf")
+
+    if not os.path.exists(font_path):
+        raise FileNotFoundError(f"폰트 파일을 찾을 수 없습니다: {font_path}")
+
+    fm.fontManager.addfont(font_path)
+    font_name = fm.FontProperties(fname=font_path).get_name()
+
+    plt.rcParams["font.family"] = font_name
+    plt.rcParams["axes.unicode_minus"] = False
     
 # ==============================
 # 사용자 계정 (로그인용)
