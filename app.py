@@ -8,6 +8,10 @@ import boto3
 
 KST = timezone(timedelta(hours=9))
 
+def now_kst_str() -> str:
+    """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
+    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    
 # ==============================
 # 사용자 계정 (로그인용)
 # ==============================
@@ -18,10 +22,49 @@ USER_ACCOUNTS = {
     "se": {"password": "0000", "display_name": "이성은"},
 }
 
+# ==============================
+# 기본 설정 + CSS
+# ==============================
+st.set_page_config(page_title="벌크 관리 시스템", layout="wide")
 
-def now_kst_str() -> str:
-    """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
-    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+st.markdown(
+    """
+    <style>
+    /* 텍스트 입력 칸은 화면 폭과 상관없이 고정 크기 + 확장 금지 */
+    .stTextInput > div {
+        flex: 0 0 auto !important;
+    }
+    .stTextInput > div > div > input {
+        width: 160px !important;
+        max-width: 160px !important;
+        min-width: 160px !important;
+    }
+
+    /* 🔹 st.form 테두리/배경 제거 */
+    .stForm {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        background-color: transparent !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
+PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
+MOVE_LOG_CSV = "bulk_move_log.csv"     # 이동 이력
+RECEIVE_FILE = "receive.xlsx"          # 사급: 입하번호 기반
+STOCK_FILE = "stock.xlsx"              # 전산 재고
+
+# ==============================
+# S3 연동 설정
+# ==============================
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "bulk-system-enc")
+S3_PREFIX = os.getenv("S3_PREFIX", "bulk-app/")  # 폴더 경로
+
 
 def s3_enabled() -> bool:
     return bool(S3_BUCKET_NAME)
@@ -215,6 +258,16 @@ def save_drums(df: pd.DataFrame):
     # 3) S3 업로드
     s3_upload_bytes(CSV_PATH, data)
 
+# ==============================
+# 위치 카테고리 (지도/이동 공통)
+# ==============================
+FLOOR_ZONES = {
+    "2층": ["A", "B", "C", "D", "E", "미지정"],
+    "4층": ["블리스터", "로타리", "덕용", "미지정"],
+    "5층": ["기초", "덕용", "미지정"],
+    "6층": ["스틱&파우치", "스킨팩", "미지정"],
+}
+SPECIAL_AREAS = ["외주", "폐기", "소진", "창고"]  # 미지정 붙이지 않음
 
 def location_picker(key_prefix: str) -> str:
     """
@@ -1032,7 +1085,7 @@ def render_tab_move():
         )
 
         # 🔹 입력칸 두 개 나란히
-        col_in1, col_in2, _sp = st.columns([1, 1, 2.5])
+        col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
         with col_in1:
             barcode = st.text_input(
                 barcode_label,
@@ -1047,7 +1100,7 @@ def render_tab_move():
             )
 
         # 🔹 조회하기 / 초기화 버튼 한 줄
-        col_b1, col_b2, _sp2 = st.columns([1, 1, 2.5])
+        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
         with col_b1:
             search_submit = st.form_submit_button("조회하기", use_container_width=True)
         with col_b2:
@@ -1690,20 +1743,10 @@ def render_tab_lookup():
             use_container_width=True,
             hide_index=True,
             column_config={
-                "품목코드": st.column_config.TextColumn("품목코드", width="small"),
-                "로트번호": st.column_config.TextColumn("로트번호", width="small"),
-                "제조일자": st.column_config.TextColumn("제조일자", width="small"),
-                "상태": st.column_config.TextColumn("상태", width="small"),
-                "통번호": st.column_config.NumberColumn("통번호", width="small"),
-                "통용량": st.column_config.NumberColumn("통용량", width="small"),
-                "현재위치": st.column_config.TextColumn("현재위치", width="small"),
-                "TAT": st.column_config.NumberColumn("TAT", width="small"),
-
-                # ✅ 품명에 최대 폭 몰아주기
                 "품명": st.column_config.TextColumn(
                     "품명",
-                    width="large",
-                ),
+                    width="large",   # 🔥 이게 핵심: 품명 칸을 넓게 확장
+                )
             },
         )
 
@@ -2056,10 +2099,11 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # ---- 필터 적용 ----
     if lot_filter:
         q = lot_filter.strip().lower()
-        df_view = df[df["로트번호"].astype(str).str.lower().str.contains(q, na=False)].copy()
+        df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+        mask = df["lot_lower"].str.contains(q, na=False)
+        df_view = df[mask].copy()
     else:
         df_view = df.copy()
 
@@ -2069,22 +2113,35 @@ def render_tab_move_log():
 
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # ---- 페이지네이션 ----
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
+
+    # 현재 페이지가 전체 범위를 벗어나지 않도록 보정
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    ss["log_page"] = st.slider(
-        "페이지 선택",
-        min_value=1,
-        max_value=total_pages,
-        value=ss["log_page"],
-        step=1,
-    )
+    # 페이지네이션 UI (슬라이더 한 줄)
+    colp = st.columns([3])
+    with colp[0]:
+        ss["log_page"] = st.slider(
+            "페이지 선택",
+            min_value=1,
+            max_value=total_pages,
+            value=ss["log_page"],
+            step=1,
+        )
 
+    # ✅ 슬라이더 값 확정된 뒤 한 번만 start/end 계산
     start = (ss["log_page"] - 1) * page_size
     end = start + page_size
+
+    st.markdown(
+        f"**페이지 {ss['log_page']} / {total_pages}** &nbsp;&nbsp; "
+        f"(총 {total_rows}건, 페이지당 {page_size}건)",
+        unsafe_allow_html=True,
+    )
+
+    # ✅ 해당 구간 데이터만 잘라서 사용
     page_df = df_view.iloc[start:end].copy()
 
     st.markdown(
@@ -2093,6 +2150,10 @@ def render_tab_move_log():
         f"</div>",
         unsafe_allow_html=True,
     )
+    
+    start = (ss["log_page"] - 1) * page_size
+    end = start + page_size
+    page_df = df_view.iloc[start:end].copy()
 
     cols_order = [
         "시간",
@@ -2107,23 +2168,24 @@ def render_tab_move_log():
         "변경 전 위치",
         "변경 후 위치",
     ]
-    cols_order = [c for c in cols_order if c in page_df.columns]
-    page_df = page_df[cols_order].copy()
+    page_df = page_df[cols_order]
 
     delete_col = "삭제"
-    page_df[delete_col] = False
+    if delete_col not in page_df.columns:
+        page_df[delete_col] = False
 
     st.caption(
-        "※ LOG는 수정할 수 없습니다. 조회만 가능하며, '삭제'에 체크 후 "
-        "'선택 행 삭제(롤백)'을 누르면 해당 이동 이력은 삭제되고, 통 정보 CSV는 변경 전 상태로 롤백됩니다.\n"
-        "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제(롤백)할 수 있습니다."
+        "※ LOG는 수정할 수 없습니다. "
+        "조회만 가능하며, '삭제'에 체크 후 '선택 행 삭제(롤백)'을 누르면 "
+        "해당 이동 이력은 삭제되고, 통 정보 CSV는 변경 전 상태로 롤백됩니다.\n"
+        "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다."
     )
 
     # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
     edited_page = st.data_editor(
         page_df,
         use_container_width=True,
-        disabled=cols_order,
+        disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
@@ -2142,19 +2204,22 @@ def render_tab_move_log():
             pass
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
-    # ---- 롤백 버튼 ----
+    # 🔹 이제는 삭제(롤백) 버튼만 존재
     _, col_delete = st.columns([3, 1])
+
     with col_delete:
         if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
             try:
-                # 체크된 행 인덱스(현재 페이지 기준)
-                to_del_idx = edited_page.index[edited_page[delete_col] == True].tolist()
-                if not to_del_idx:
+                if delete_col in edited_page.columns:
+                    to_del_idx = edited_page[edited_page[delete_col] == True].index
+                else:
+                    to_del_idx = []
+
+                if len(to_del_idx) == 0:
                     st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
                     return
 
-                # df_view(필터/정렬 후)에서의 원본 인덱스를 추적해야 함
-                # page_df의 index는 df_view의 index를 그대로 유지하므로, 그 인덱스로 원본 df에서 삭제 대상 선택 가능
+                # 원본 전체 로그에서 삭제 대상 행 추출
                 rows_to_delete = df.loc[to_del_idx].copy()
 
                 # 1) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
@@ -2164,10 +2229,13 @@ def render_tab_move_log():
                 not_latest = []
                 for idx, row in rows_to_delete.iterrows():
                     lot = str(row["로트번호"])
-                    drum_no = int(pd.to_numeric(row["통번호"], errors="coerce") or 0)
+                    drum_no = int(row["통번호"])
 
-                    mask = (log_all["로트번호"].astype(str) == lot) & (log_all["통번호"] == drum_no)
+                    mask = (
+                        log_all["로트번호"].astype(str) == lot
+                    ) & (log_all["통번호"] == drum_no)
                     sub = log_all[mask]
+
                     if sub.empty:
                         continue
 
@@ -2175,6 +2243,7 @@ def render_tab_move_log():
                     if not sub_valid.empty:
                         last_idx = sub_valid["__dt"].idxmax()
                     else:
+                        # 시간 파싱이 안 되면, 인덱스 기준으로 가장 큰 값 = 마지막
                         last_idx = sub.index.max()
 
                     if idx != last_idx:
@@ -2188,29 +2257,34 @@ def render_tab_move_log():
                     )
                     return
 
-                # 2) 통 정보 CSV 롤백 (통용량/현재위치만)
+                # 2) 통 정보 CSV 롤백
                 drums_df = load_drums()
                 drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
 
                 for _, row in rows_to_delete.iterrows():
                     lot = str(row["로트번호"])
                     lot_lower = lot.lower()
-                    drum_no = int(pd.to_numeric(row["통번호"], errors="coerce") or 0)
+                    drum_no = int(row["통번호"])
 
-                    old_qty = float(pd.to_numeric(row["변경 전 용량"], errors="coerce") or 0)
-                    from_loc = str(row["변경 전 위치"]) if not pd.isna(row.get("변경 전 위치")) else ""
+                    old_qty = float(row["변경 전 용량"])
+                    from_loc = str(row["변경 전 위치"]) if not pd.isna(row["변경 전 위치"]) else ""
 
                     mask_drum = (drums_df["lot_lower"] == lot_lower) & (drums_df["통번호"] == drum_no)
                     drum_idxs = drums_df.index[mask_drum]
+
                     if len(drum_idxs) == 0:
+                        # 해당 통 정보가 CSV에 없으면 스킵
                         continue
 
                     i = drum_idxs[0]
                     drums_df.at[i, "통용량"] = old_qty
                     if from_loc:
                         drums_df.at[i, "현재위치"] = from_loc
+                    # 상태까지 완벽히 복원하려면 로그에 상태를 추가로 기록해야 함.
+                    # 지금은 통용량/현재위치만 롤백.
 
-                drums_df = drums_df.drop(columns=["lot_lower"], errors="ignore")
+                if "lot_lower" in drums_df.columns:
+                    drums_df = drums_df.drop(columns=["lot_lower"])
                 save_drums(drums_df)
 
                 # 3) 이동 로그에서 행 삭제 + 저장
@@ -2222,6 +2296,17 @@ def render_tab_move_log():
 
             except Exception as e:
                 st.error(f"행을 삭제(롤백)하는 중 오류가 발생했습니다: {e}")
+
+# ==============================
+# 탭 5: 데이터 파일 관리
+# ==============================
+def file_status(sess_key: str, path: str) -> str:
+    ss = st.session_state
+    if sess_key in ss:
+        return "세션에 업로드된 파일 사용 중"
+    if os.path.exists(path):
+        return f"로컬 파일 사용 중 ({path})"
+    return "파일 없음"
 
 
 def render_tab_data():
