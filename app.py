@@ -301,6 +301,8 @@ def save_drums(df: pd.DataFrame):
 def df_to_png_bytes_landscape(
     df: pd.DataFrame,
     title: str = "",
+    wrap_col: str = "품명",
+    max_wrap: int = 30,
 ) -> bytes:
     """
     이동이력 전용 PNG (가로형)
@@ -308,6 +310,14 @@ def df_to_png_bytes_landscape(
     - 통번호/용량/변화량: 최소 폭
     """
     df = df.copy().fillna("").astype(str)
+
+    # ✅ 품명(또는 wrap_col)만 줄바꿈
+    if wrap_col in df.columns and max_wrap and max_wrap > 0:
+        df[wrap_col] = df[wrap_col].apply(
+            lambda s: "\n".join(
+                textwrap.wrap(str(s), width=max_wrap)
+            ) if str(s).strip() else ""
+        )
 
     n_rows, n_cols = df.shape
 
