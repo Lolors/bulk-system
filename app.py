@@ -2141,16 +2141,6 @@ def render_tab_move_log():
             step=1,
         )
 
-    # ✅ 슬라이더 값 확정된 뒤 한 번만 start/end 계산
-    start = (ss["log_page"] - 1) * page_size
-    end = start + page_size
-
-    st.markdown(
-        f"**페이지 {ss['log_page']} / {total_pages}** &nbsp;&nbsp; "
-        f"(총 {total_rows}건, 페이지당 {page_size}건)",
-        unsafe_allow_html=True,
-    )
-
     # ✅ 해당 구간 데이터만 잘라서 사용
     page_df = df_view.iloc[start:end].copy()
 
