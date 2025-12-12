@@ -2195,6 +2195,7 @@ def render_tab_move_log():
         disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
+            "품명": st.column_config.TextColumn("품명", width="large"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
