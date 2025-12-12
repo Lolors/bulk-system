@@ -229,28 +229,16 @@ def _load_drums_core(bulk_bytes):
     df["통번호"] = pd.to_numeric(df["통번호"], errors="coerce").fillna(0).astype(int)
     df["통용량"] = pd.to_numeric(df["통용량"], errors="coerce").fillna(0.0).astype(float)
 
-def norm_loc(x) -> str:
-    if pd.isna(x):
-        return ""
-    s = str(x).strip()
-    if not s:
-        return ""
-
-    # 특수 구역: 그대로
-    if s in ["외주", "폐기", "소진", "창고"]:
+    def norm_loc(x: str) -> str:
+        if pd.isna(x):
+            return ""
+        s = str(x).strip()
+        if "-" not in s:
+            if s in ["2층", "4층", "5층", "6층"]:
+                return f"{s}-A1"
         return s
 
-    # 혹시 예전 데이터에 '-'가 남아있으면 공백으로 복원 (예: "4층-A1" -> "4층 A1")
-    if "-" in s:
-        s = s.replace("-", " ", 1).strip()
-
-    # 층만 들어온 경우 -> "X층 미지정"
-    if s in ["2층", "4층", "5층", "6층"]:
-        return f"{s} 미지정"
-
-    return s
-
-df["현재위치"] = df["현재위치"].apply(norm_loc)
+    df["현재위치"] = df["현재위치"].apply(norm_loc)
 
     return df
 
@@ -287,41 +275,6 @@ def save_drums(df: pd.DataFrame):
 
     # 3) S3 업로드
     s3_upload_bytes(CSV_PATH, data)
-
-# ==============================
-# 위치 카테고리 (지도/이동 공통)
-# ==============================
-FLOOR_ZONES = {
-    "2층": ["A", "B", "C", "D", "E", "미지정"],
-    "4층": ["블리스터", "로타리", "덕용", "미지정"],
-    "5층": ["기초", "덕용", "미지정"],
-    "6층": ["스틱&파우치", "스킨팩", "미지정"],
-}
-SPECIAL_AREAS = ["외주", "폐기", "소진", "창고"]  # 미지정 붙이지 않음
-
-
-def location_picker(key_prefix: str) -> str:
-    """
-    지도 탭과 동일한 카테고리로 '현재위치' 문자열을 만든다.
-    return 예:
-      - "4층 로타리"
-      - "5층 미지정"
-      - "외주" / "폐기" / "소진" / "창고"
-    """
-    kind = st.radio(
-        "이동할 위치 종류",
-        ["층/세부구역", "특수구역(외주/폐기/소진/창고)"],
-        horizontal=True,
-        key=f"{key_prefix}_kind",
-    )
-
-    if kind == "특수구역(외주/폐기/소진/창고)":
-        sp = st.selectbox("특수구역 선택", SPECIAL_AREAS, key=f"{key_prefix}_special")
-        return sp
-
-    floor = st.selectbox("층 선택", list(FLOOR_ZONES.keys()), key=f"{key_prefix}_floor")
-    zone = st.selectbox("세부구역 선택", FLOOR_ZONES[floor], key=f"{key_prefix}_zone")
-    return f"{floor} {zone}"
 
 
 @st.cache_data(show_spinner=False)
@@ -1038,9 +991,6 @@ def get_stock_summary(item_code: str, lot: str):
 
     return summary, ""
 
-
-
-
 # ==============================
 # 탭 1: 이동 - 입력값 초기화
 # ==============================
@@ -1556,13 +1506,10 @@ def render_tab_move():
                     "이동하실 구역을 선택해 주세요.", zone_list, key="mv_zone_csv"
                 )
 
-            if sel_floor in ["창고", "소진", "폐기", "외주"]:
+            if sel_floor in ["창고", "소진", "미지정", "폐기", "외주"]:
                 to_zone = sel_floor
             else:
-                z = (sel_zone or "").strip()
-                if not z:
-                    z = "미지정"
-                to_zone = f"{sel_floor} {z}"
+                to_zone = f"{sel_floor}-{sel_zone}"
 
         if to_zone == "외주":
             move_status = "외주"
