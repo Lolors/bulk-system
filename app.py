@@ -52,46 +52,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-    <style>
-    /* ===== data_editor(ag-grid) 컬럼 폭 강제 ===== */
-    .ag-theme-streamlit .ag-header-cell[col-id="품명"],
-    .ag-theme-streamlit .ag-cell[col-id="품명"],
-    .ag-theme-alpine .ag-header-cell[col-id="품명"],
-    .ag-theme-alpine .ag-cell[col-id="품명"]{
-        flex: 4 1 600px !important;
-        min-width: 600px !important;
-    }
-
-    /* ✅ 통번호: 매우 좁게 */
-    .ag-theme-streamlit .ag-header-cell[col-id="통번호"],
-    .ag-theme-streamlit .ag-cell[col-id="통번호"],
-    .ag-theme-alpine .ag-header-cell[col-id="통번호"],
-    .ag-theme-alpine .ag-cell[col-id="통번호"]{
-        flex: 0 0 70px !important;
-        min-width: 70px !important;
-        max-width: 70px !important;
-    }
-
-    /* ✅ 변경 전/후 용량: 좁게 */
-    .ag-theme-streamlit .ag-header-cell[col-id="변경 전 용량"],
-    .ag-theme-streamlit .ag-cell[col-id="변경 전 용량"],
-    .ag-theme-streamlit .ag-header-cell[col-id="변경 후 용량"],
-    .ag-theme-streamlit .ag-cell[col-id="변경 후 용량"],
-    .ag-theme-alpine .ag-header-cell[col-id="변경 전 용량"],
-    .ag-theme-alpine .ag-cell[col-id="변경 전 용량"],
-    .ag-theme-alpine .ag-header-cell[col-id="변경 후 용량"],
-    .ag-theme-alpine .ag-cell[col-id="변경 후 용량"]{
-        flex: 0 0 110px !important;
-        min-width: 110px !important;
-        max-width: 110px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
@@ -1793,7 +1753,10 @@ def render_tab_lookup():
                 "TAT": st.column_config.NumberColumn("TAT", width="small"),
 
                 # ✅ 품명에 최대 폭 몰아주기
-                "품명": st.column_config.TextColumn("품명", width="large", max_chars=None),
+                "품명": st.column_config.TextColumn(
+                    "품명",
+                    width="large",
+                ),
             },
         )
 
@@ -2231,35 +2194,13 @@ def render_tab_move_log():
     # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
     edited_page = st.data_editor(
         page_df,
-        use_container_width=False,  # ✅ 가로폭 강제 확장 대신, 필요한 만큼 쓰고 가로 스크롤 허용
+        use_container_width=True,
         disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
-            delete_col: st.column_config.CheckboxColumn(
-                "삭제",
-                help="롤백할 행에 체크",
-            ),
-
-            # ✅ 가장 넓게
-            "품명": st.column_config.TextColumn(
-                "품명",
-                width="large",
-            ),
-
-            # ✅ 좁혀줄 애들(짧은 값/숫자)
-            "시간": st.column_config.TextColumn("시간", width="small"),
-            "ID": st.column_config.TextColumn("ID", width="small"),
-            "품번": st.column_config.TextColumn("품번", width="small"),
-            "로트번호": st.column_config.TextColumn("로트번호", width="small"),
-            "통번호": st.column_config.NumberColumn("통번호", width="small"),
-            "변경 전 용량": st.column_config.NumberColumn("변경 전 용량", width="small"),
-            "변경 후 용량": st.column_config.NumberColumn("변경 후 용량", width="small"),
-            "변화량": st.column_config.NumberColumn("변화량", width="small"),
-            "변경 전 위치": st.column_config.TextColumn("변경 전 위치", width="small"),
-            "변경 후 위치": st.column_config.TextColumn("변경 후 위치", width="small"),
+            delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
-
 
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
