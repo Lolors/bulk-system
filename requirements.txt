@@ -2,9 +2,11 @@ streamlit
 pandas
 openpyxl
 Pillow
+matplotlib
 
 dynamsoft-barcode-reader-bundle
 boto3
 google-cloud-vision
+
 
 
