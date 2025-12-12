@@ -52,6 +52,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    """
+    <style>
+    /* ✅ 모바일/좁은 화면에서 표를 강제로 축소해서 한 폭에 더 넣기 */
+    @media (max-width: 1100px) {
+      div[data-testid="stDataFrame"] {
+        transform: scale(0.85);
+        transform-origin: top left;
+        width: 118% !important;  /* scale로 줄어든 폭 보정 */
+      }
+
+      /* 글씨도 같이 조금 줄이기 */
+      div[data-testid="stDataFrame"] .ag-cell,
+      div[data-testid="stDataFrame"] .ag-header-cell-text {
+        font-size: 10px !important;
+      }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
