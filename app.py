@@ -8,6 +8,17 @@ import boto3
 
 KST = timezone(timedelta(hours=9))
 
+# ==============================
+# 사용자 계정 (로그인용)
+# ==============================
+USER_ACCOUNTS = {
+    "ps": {"password": "0000", "display_name": "임필선"},
+    "by": {"password": "0000", "display_name": "강봉연"},
+    "hn": {"password": "0000", "display_name": "김한나"},
+    "se": {"password": "0000", "display_name": "이성은"},
+}
+
+
 def now_kst_str() -> str:
     """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
