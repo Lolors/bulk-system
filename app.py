@@ -59,7 +59,7 @@ st.markdown(
     .ag-theme-streamlit .ag-header-cell[col-id="품명"],
     .ag-theme-streamlit .ag-cell[col-id="품명"] {
         flex: 3 1 800px !important;   /* 품명은 크게 */
-        min-width: 650px !important;
+        min-width: 800px !important;
     }
 
     /* 나머지 텍스트 컬럼은 너무 커지지 않게 눌러주기(선택) */
