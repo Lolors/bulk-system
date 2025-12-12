@@ -2231,32 +2231,35 @@ def render_tab_move_log():
     # 🔹 모든 칼럼은 읽기 전용, '삭제'만 체크 가능
     edited_page = st.data_editor(
         page_df,
-        use_container_width=True,
+        use_container_width=False,  # ✅ 가로폭 강제 확장 대신, 필요한 만큼 쓰고 가로 스크롤 허용
         disabled=cols_order,  # 시간~변경 후 위치까지 전부 읽기 전용
         column_config={
             delete_col: st.column_config.CheckboxColumn(
                 "삭제",
                 help="롤백할 행에 체크",
             ),
+
+            # ✅ 가장 넓게
             "품명": st.column_config.TextColumn(
                 "품명",
                 width="large",
             ),
-            "통번호": st.column_config.NumberColumn(
-                "통번호",
-                width="small",
-            ),
-            "변경 전 용량": st.column_config.NumberColumn(
-                "변경 전 용량",
-                width="small",
-            ),
-            "변경 후 용량": st.column_config.NumberColumn(
-                "변경 후 용량",
-                width="small",
-            ),
+
+            # ✅ 좁혀줄 애들(짧은 값/숫자)
+            "시간": st.column_config.TextColumn("시간", width="small"),
+            "ID": st.column_config.TextColumn("ID", width="small"),
+            "품번": st.column_config.TextColumn("품번", width="small"),
+            "로트번호": st.column_config.TextColumn("로트번호", width="small"),
+            "통번호": st.column_config.NumberColumn("통번호", width="small"),
+            "변경 전 용량": st.column_config.NumberColumn("변경 전 용량", width="small"),
+            "변경 후 용량": st.column_config.NumberColumn("변경 후 용량", width="small"),
+            "변화량": st.column_config.NumberColumn("변화량", width="small"),
+            "변경 전 위치": st.column_config.TextColumn("변경 전 위치", width="small"),
+            "변경 후 위치": st.column_config.TextColumn("변경 후 위치", width="small"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
+
 
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
