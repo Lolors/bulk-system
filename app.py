@@ -5,6 +5,7 @@ from datetime import datetime, date, timezone, timedelta
 import io
 import math
 import boto3
+import textwrap
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
@@ -313,8 +314,8 @@ def df_to_png_bytes_landscape(
 
     # 🔹 품명 줄바꿈(선택)
     if wrap_col in df.columns:
-        df[wrap_col] = df[wrap_col].apply(
-            lambda s: "\n".join(textwrap.wrap(s, width=max_wrap)) if s else ""
+        df[wrap_col] = df[wrap_col].fillna("").astype(str).apply(
+            lambda s: "\n".join(textwrap.wrap(s, width=max_wrap)) if s.strip() else ""
         )
 
     cols = df.columns.tolist()
