@@ -13,6 +13,14 @@ KST = timezone(timedelta(hours=9))
 def now_kst_str() -> str:
     """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+def set_korean_font():
+    font_path = "assets/fonts/NanumGothic.ttf"
+    if os.path.exists(font_path):
+        fm.fontManager.addfont(font_path)
+        font_name = fm.FontProperties(fname=font_path).get_name()
+        matplotlib.rcParams["font.family"] = font_name
+    matplotlib.rcParams["axes.unicode_minus"] = False
     
 # ==============================
 # 사용자 계정 (로그인용)
