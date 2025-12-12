@@ -52,6 +52,48 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    """
+    <style>
+    /* ===== 기존 CSS 유지 ===== */
+
+    /* ✅ 모바일/태블릿(폭이 좁을 때) 표를 한 화면에 더 잘 맞추기 */
+    @media (max-width: 1100px) {
+
+        /* data_editor / dataframe 공통 */
+        div[data-testid="stDataFrame"] {
+            width: 100% !important;
+        }
+
+        /* 헤더 글씨 */
+        div[data-testid="stDataFrame"] .ag-header-cell-text {
+            font-size: 10px !important;
+        }
+
+        /* 셀 글씨 */
+        div[data-testid="stDataFrame"] .ag-cell {
+            font-size: 10px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+        }
+
+        /* 행 높이도 살짝 줄이기 */
+        div[data-testid="stDataFrame"] .ag-row {
+            min-height: 22px !important;
+        }
+    }
+
+    /* ✅ “품명” 같은 긴 텍스트가 가로폭을 깨지 않게: 줄바꿈(권장) */
+    div[data-testid="stDataFrame"] .ag-cell {
+        white-space: normal !important;
+        line-height: 1.1 !important;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
