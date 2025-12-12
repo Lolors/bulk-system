@@ -58,7 +58,7 @@ st.markdown(
     /* ✅ data_editor(ag-grid)에서 '품명' 컬럼 폭 강제 확장 */
     .ag-theme-streamlit .ag-header-cell[col-id="품명"],
     .ag-theme-streamlit .ag-cell[col-id="품명"] {
-        flex: 3 1 650px !important;   /* 품명은 크게 */
+        flex: 3 1 800px !important;   /* 품명은 크게 */
         min-width: 650px !important;
     }
 
