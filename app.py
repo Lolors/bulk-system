@@ -269,6 +269,61 @@ FLOOR_ZONES = {
 }
 SPECIAL_AREAS = ["외주", "폐기", "소진", "창고"]  # 미지정 붙이지 않음
 
+def location_picker(key_prefix: str) -> str:
+    """
+    지도 탭과 동일한 카테고리로 '현재위치' 문자열을 만든다.
+
+    - 층 변경 시 세부구역 자동 리셋
+    - 세부구역이 비면 자동으로 '미지정' fallback
+    - 특수구역(외주/폐기/소진/창고)은 그대로 반환
+
+    return 예:
+      - "4층 로타리"
+      - "5층 미지정"
+      - "외주" / "폐기" / "소진" / "창고"
+    """
+    kind = st.radio(
+        "이동할 위치 종류",
+        ["층/세부구역", "특수구역(외주/폐기/소진/창고)"],
+        horizontal=True,
+        key=f"{key_prefix}_kind",
+    )
+
+    if kind == "특수구역(외주/폐기/소진/창고)":
+        sp = st.selectbox("특수구역 선택", SPECIAL_AREAS, key=f"{key_prefix}_special")
+        return sp
+
+    floors = list(FLOOR_ZONES.keys())
+
+    # ✅ 층 선택
+    floor_key = f"{key_prefix}_floor"
+    zone_key = f"{key_prefix}_zone"
+    last_floor_key = f"{key_prefix}_last_floor"
+
+    floor = st.selectbox("층 선택", floors, key=floor_key)
+
+    # ✅ 층이 바뀌면 세부구역 선택값 자동 리셋
+    prev_floor = st.session_state.get(last_floor_key)
+    if prev_floor is None:
+        st.session_state[last_floor_key] = floor
+    elif prev_floor != floor:
+        # zone 위젯 값 제거(리셋)
+        if zone_key in st.session_state:
+            del st.session_state[zone_key]
+        st.session_state[last_floor_key] = floor
+
+    # ✅ 세부구역 선택 (층에 따라 리스트가 바뀜)
+    zones = FLOOR_ZONES.get(floor, ["미지정"])
+    zone = st.selectbox("세부구역 선택", zones, key=zone_key)
+
+    # ✅ 자동 fallback
+    z = (zone or "").strip()
+    if not z:
+        z = "미지정"
+
+    return f"{floor} {z}"
+
+
 
 def location_picker(key_prefix: str) -> str:
     """
@@ -1510,21 +1565,25 @@ def render_tab_move():
             from_zone = st.text_input(
                 "현재 위치",
                 value=current_zone if current_zone != "혼합" else "",
-                help="예: 4층-A1, 외주 등",
+                help="예: 4층 로타리, 외주 등",
                 key="mv_from_zone_csv",
             )
         with col2:
-            floor_list = ["2층", "4층", "5층", "6층", "창고", "소진", "미지정", "폐기", "외주"]
-            sel_floor = st.selectbox(
-                "이동하실 층/구역을 선택해 주세요.", floor_list, key="mv_floor_csv"
+            to_zone = location_picker("mv_to")
+
+        if to_zone == "외주":
+            move_status = "외주"
+            st.info("이동 위치가 '외주'이므로 상태는 자동으로 '외주'로 설정됩니다.")
+        else:
+            move_status = st.radio(
+                "이동 후 상태를 선택해 주세요.",
+                ["잔량", "생산대기", "생산종료"],
+                horizontal=True,
+                key="mv_status_csv",
             )
-            if sel_floor in ["창고", "소진", "미지정", "폐기", "외주"]:
-                sel_zone = ""
-            else:
-                zone_list = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
-                sel_zone = st.selectbox(
-                    "이동하실 구역을 선택해 주세요.", zone_list, key="mv_zone_csv"
-                )
+
+        note = st.text_area("비고(선택 입력)", height=80, key="mv_note_csv")
+
 
             if sel_floor in ["창고", "소진", "폐기", "외주"]:
                 to_zone = sel_floor
