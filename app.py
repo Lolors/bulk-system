@@ -55,22 +55,37 @@ st.markdown(
 st.markdown(
     """
     <style>
-    /* ✅ data_editor(ag-grid)에서 '품명' 컬럼 폭 강제 확장 */
+    /* ===== data_editor(ag-grid) 컬럼 폭 강제 ===== */
     .ag-theme-streamlit .ag-header-cell[col-id="품명"],
-    .ag-theme-streamlit .ag-cell[col-id="품명"] {
-        flex: 3 1 800px !important;   /* 품명은 크게 */
-        min-width: 800px !important;
+    .ag-theme-streamlit .ag-cell[col-id="품명"],
+    .ag-theme-alpine .ag-header-cell[col-id="품명"],
+    .ag-theme-alpine .ag-cell[col-id="품명"]{
+        flex: 4 1 600px !important;
+        min-width: 600px !important;
     }
 
-    /* 나머지 텍스트 컬럼은 너무 커지지 않게 눌러주기(선택) */
-    .ag-theme-streamlit .ag-header-cell[col-id="시간"],
-    .ag-theme-streamlit .ag-cell[col-id="시간"],
-    .ag-theme-streamlit .ag-header-cell[col-id="로트번호"],
-    .ag-theme-streamlit .ag-cell[col-id="로트번호"],
-    .ag-theme-streamlit .ag-header-cell[col-id="품번"],
-    .ag-theme-streamlit .ag-cell[col-id="품번"] {
-        flex: 1 1 80px !important;
-        min-width: 80px !important;
+    /* ✅ 통번호: 매우 좁게 */
+    .ag-theme-streamlit .ag-header-cell[col-id="통번호"],
+    .ag-theme-streamlit .ag-cell[col-id="통번호"],
+    .ag-theme-alpine .ag-header-cell[col-id="통번호"],
+    .ag-theme-alpine .ag-cell[col-id="통번호"]{
+        flex: 0 0 70px !important;
+        min-width: 70px !important;
+        max-width: 70px !important;
+    }
+
+    /* ✅ 변경 전/후 용량: 좁게 */
+    .ag-theme-streamlit .ag-header-cell[col-id="변경 전 용량"],
+    .ag-theme-streamlit .ag-cell[col-id="변경 전 용량"],
+    .ag-theme-streamlit .ag-header-cell[col-id="변경 후 용량"],
+    .ag-theme-streamlit .ag-cell[col-id="변경 후 용량"],
+    .ag-theme-alpine .ag-header-cell[col-id="변경 전 용량"],
+    .ag-theme-alpine .ag-cell[col-id="변경 전 용량"],
+    .ag-theme-alpine .ag-header-cell[col-id="변경 후 용량"],
+    .ag-theme-alpine .ag-cell[col-id="변경 후 용량"]{
+        flex: 0 0 110px !important;
+        min-width: 110px !important;
+        max-width: 110px !important;
     }
     </style>
     """,
