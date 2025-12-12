@@ -1753,10 +1753,7 @@ def render_tab_lookup():
                 "TAT": st.column_config.NumberColumn("TAT", width="small"),
 
                 # ✅ 품명에 최대 폭 몰아주기
-                "품명": st.column_config.TextColumn(
-                    "품명",
-                    width="large",
-                ),
+                "품명": st.column_config.TextColumn("품명", width="large", max_chars=None),
             },
         )
 
