@@ -1669,11 +1669,11 @@ def render_tab_lookup():
         )
         prod_view = prod_df[mask_prod].copy()
 
-        # 🔹 제조일자(작업일자) 기준 최근 30일 이내만 남기기
+        # 🔹 제조일자(작업일자) 기준 최근 60일 이내만 남기기
         today = datetime.today()
         prod_view["작업일자"] = pd.to_datetime(prod_view["작업일자"], errors="coerce")
         prod_view = prod_view[
-            (today - prod_view["작업일자"]).dt.days <= 30
+            (today - prod_view["작업일자"]).dt.days <= 60
         ]
 
         if prod_view.empty:
