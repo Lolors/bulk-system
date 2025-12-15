@@ -1456,37 +1456,37 @@ def render_tab_move():
         # 현재 위치 (전산 기준)
         st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
 
-        # 이동이력 버튼 (한 줄 아래)
+        # 이동이력 버튼 (항상 표시)
         b_col, _sp_end = st.columns([1.2, 6])
         with b_col:
             if st.button("이동이력", key=f"move_hist_btn_{lot}"):
-                ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
-
-
-        # 🔍 전산 재고 상세 (상세보기 눌렀을 때만)
-        if ss.get("mv_show_stock_detail", False):
-            if stock_summary_df is not None and not stock_summary_df.empty:
-                st.markdown("#### 🔎 전산 재고 상세")
-
-                # 원본 복사
-                detail_df = stock_summary_df.copy()
-
-                # 실제 보여줄 컬럼만 유지
-                detail_df = detail_df[["창고코드", "창고명", "실재고수량"]].reset_index(drop=True)
-
-                # 행 수에 맞춘 동적 높이 계산
-                header_height = 40
-                row_height = 32
-                n_rows = len(detail_df)
-                table_height = header_height + row_height * max(n_rows, 1)
-
-                st.dataframe(
-                    detail_df,
-                    use_container_width=True,
-                    height=table_height,
+                ss["mv_show_move_history_here"] = not ss.get(
+                    "mv_show_move_history_here", False
                 )
-            else:
-                st.info("전산 재고 데이터가 없습니다.")
+
+
+        # 🔎 전산 재고 상세 (항상 표시)
+        if stock_summary_df is not None and not stock_summary_df.empty:
+            st.markdown("#### 🔎 전산 재고 상세")
+
+            detail_df = stock_summary_df.copy()
+
+            detail_df = detail_df[
+                ["창고코드", "창고명", "실재고수량"]
+            ].reset_index(drop=True)
+
+            header_height = 40
+            row_height = 32
+            n_rows = len(detail_df)
+            table_height = header_height + row_height * max(n_rows, 1)
+
+            st.dataframe(
+                detail_df,
+                use_container_width=True,
+                height=table_height,
+            )
+        else:
+            st.info("전산 재고 데이터가 없습니다.")
 
         # 🔴 여기부터는 상세보기와 상관없이 항상 보여야 하는 영역
         st.markdown("### ✅ 통 선택 및 잔량 입력")
