@@ -1454,7 +1454,7 @@ def render_tab_move():
         )
 
         # 현재 위치(전산 기준) + 이동이력 버튼을 한 줄에
-        loc_col, btn_col, _sp = st.columns([6, 1.2, 4])
+        loc_col, btn_col, _sp = st.columns([6, 2, 4])
 
         with loc_col:
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
