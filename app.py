@@ -1408,14 +1408,28 @@ def render_tab_move():
 
     # stock.xlsx 기반 전산 재고 요약
     stock_summary_df, _ = get_stock_summary(item_code, lot)
+
     if stock_summary_df is not None and not stock_summary_df.empty:
-        top = stock_summary_df.iloc[0]
-        # 예: 자사(스틱,파우치 충포장실) 10kg
-        qty_int = int(top["실재고수량"]) if pd.notna(top["실재고수량"]) else 0
-        stock_loc_display = f"{top['대분류']}({top['창고명']}) {qty_int}kg"
+        parts = []
+
+        for _, r in stock_summary_df.iterrows():
+            qty = r.get("실재고수량", 0)
+            if pd.isna(qty):
+                continue
+
+            qty_int = int(float(qty))
+            if qty_int == 0:
+                continue
+
+            cat = str(r.get("대분류", "")).strip()
+            wh_name = str(r.get("창고명", "")).strip()
+
+            # 예: 창고(양성창고) 570kg
+            parts.append(f"{cat}({wh_name}) {qty_int}kg")
+
+        stock_loc_display = ", ".join(parts) if parts else current_zone
     else:
         stock_loc_display = current_zone
-
 
     # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
     selected_drums = []
