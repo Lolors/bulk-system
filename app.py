@@ -1950,7 +1950,7 @@ def render_tab_map():
     # -----------------------------
     # (2) 특수 구역: 외주/폐기/소진
     # -----------------------------
-    special_floors = {"외주", "폐기", "소진"}
+    special_floors = {"외주", "폐기", "소진", "창고"}
     if sel_floor in special_floors:
         st.markdown(f"#### {sel_floor} 구역 현황")
 
