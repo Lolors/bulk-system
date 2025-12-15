@@ -1456,12 +1456,9 @@ def render_tab_move():
         # 현재 위치 (전산 기준)
         st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
 
-        # 버튼은 무조건 한 줄 아래로 분리
-        b1_col, b_sp, b2_col, _sp_end = st.columns([1.2, 0.001, 1.2, 6])
-        with b1_col:
-            if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
-                ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
-        with b2_col:
+        # 이동이력 버튼 (한 줄 아래)
+        b_col, _sp_end = st.columns([1.2, 6])
+        with b_col:
             if st.button("이동이력", key=f"move_hist_btn_{lot}"):
                 ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
