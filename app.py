@@ -1501,7 +1501,7 @@ def render_tab_move():
         lot_df = lot_df.reset_index(drop=True)
         index_list = lot_df.index.tolist()
 
-        c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
+        c1, c_sp, c2, _c_gap = st.columns([2, 0.15, 2, 7])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
                 for idx in index_list:
