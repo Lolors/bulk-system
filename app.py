@@ -1669,15 +1669,15 @@ def render_tab_lookup():
         )
         prod_view = prod_df[mask_prod].copy()
 
-        # 🔹 제조일자(작업일자) 기준 최근 60일 이내만 남기기
+        # 🔹 제조일자(작업일자) 기준 최근 180일 이내만 남기기
         today = datetime.today()
         prod_view["작업일자"] = pd.to_datetime(prod_view["작업일자"], errors="coerce")
         prod_view = prod_view[
-            (today - prod_view["작업일자"]).dt.days <= 60
+            (today - prod_view["작업일자"]).dt.days <= 180
         ]
 
         if prod_view.empty:
-            st.info("최근 1개월 이내 제조된 재고가 없습니다.")
+            st.info("최근 6개월 이내 제조된 재고가 없습니다.")
             return
 
         # ===== production 기반 가상 벌크통 생성 =====
