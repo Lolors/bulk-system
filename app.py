@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime, date, timezone, timedelta
+import matplotlib.pyplot as plt
+import textwrap
 import io
 import math
 import boto3
@@ -2195,6 +2197,55 @@ def render_tab_move_log():
         key=f"move_log_editor_page_{ss['log_page']}",
     )
 
+    # ✅ 공유용 이미지(PNG) 다운로드 버튼 (모바일 카톡 공유용)
+    st.markdown("---")
+    try:
+        png_bytes = df_to_png_bytes(page_df.drop(columns=[delete_col], errors="ignore"))
+        st.download_button(
+            "📸 이 페이지를 이미지(PNG)로 다운로드",
+            data=png_bytes,
+            file_name=f"move_log_page_{ss['log_page']}.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+        st.caption("모바일에서 다운로드한 PNG를 카카오톡/메신저로 공유하면 표가 잘리지 않습니다.")
+    except Exception as e:
+        st.warning(f"이미지 생성 중 오류: {e}")
+
+def df_to_png_bytes(df: pd.DataFrame) -> bytes:
+    # 너무 길게 나오면 모바일 공유가 힘드니 적당히 컷 (원하면 숫자 조절)
+    df = df.copy().head(30)
+
+    # 문자열 줄바꿈(특히 품명) - 원하면 길이 조절
+    if "품명" in df.columns:
+        df["품명"] = df["품명"].astype(str).apply(lambda s: "\n".join(textwrap.wrap(s, width=22)))
+
+    # 그림 크기 자동(행 수 따라 높이 증가)
+    n_rows, n_cols = df.shape
+    fig_w = min(20, max(12, n_cols * 1.6))
+    fig_h = min(20, max(6, n_rows * 0.45 + 1.5))
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=df.values,
+        colLabels=df.columns,
+        cellLoc="center",
+        loc="upper left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.3)
+
+    buf = io.BytesIO()
+    plt.tight_layout()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+    
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
         df_updated.to_csv(buf, index=False, encoding="utf-8-sig")
