@@ -1453,12 +1453,13 @@ def render_tab_move():
             """
         )
 
-        # 현재 위치 (전산 기준) ✅ 이건 그대로 유지
-        st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+        # 현재 위치(전산 기준) + 이동이력 버튼을 한 줄에
+        loc_col, btn_col, _sp = st.columns([6, 1.2, 4])
 
-        # 이동이력 버튼 (원하면 유지)
-        b_col, _sp_end = st.columns([1.2, 6])
-        with b_col:
+        with loc_col:
+            st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+
+        with btn_col:
             if st.button("이동이력", key=f"move_hist_btn_{lot}"):
                 ss["mv_show_move_history_here"] = not ss.get(
                     "mv_show_move_history_here", False
