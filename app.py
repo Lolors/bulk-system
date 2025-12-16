@@ -2152,40 +2152,47 @@ def render_tab_move_log():
     page_df = df_view.iloc[start:end].copy()
 
     # ==============================
-    # 📱 공유용 요약 데이터 가공
+    # 📱 모바일 공유용 보기 (토글)
     # ==============================
+    show_mobile_share = st.toggle("📱 모바일 공유용 보기", value=False, key=f"mvlog_mobile_share_{ss['log_page']}")
 
-    share_df = page_df.copy()
+    if show_mobile_share:
+        share_df = page_df.copy().fillna("")
 
-    # NaN → 공백 처리
-    share_df = share_df.fillna("")
+        # 숫자 컬럼 안전 변환
+        share_df["통번호"] = pd.to_numeric(share_df.get("통번호", ""), errors="coerce").fillna(0).astype(int)
+        share_df["변경 전 용량"] = pd.to_numeric(share_df.get("변경 전 용량", ""), errors="coerce").fillna(0)
+        share_df["변경 후 용량"] = pd.to_numeric(share_df.get("변경 후 용량", ""), errors="coerce").fillna(0)
+        share_df["변화량"] = pd.to_numeric(share_df.get("변화량", ""), errors="coerce").fillna(0)
 
-    # "로트번호 / n번 통 / 품명" 형식으로 표시용 컬럼 생성
-    share_df["요약"] = (
-        share_df["로트번호"].astype(str).str.strip()
-        + " / "
-        + share_df["통번호"].astype(str).str.strip()
-        + "번 통 / "
-        + share_df["품명"].astype(str).str.strip()
-    )
+        # 보기 좋은 문자열 생성 (NaN은 이미 공백)
+        share_df["요약"] = (
+            share_df["로트번호"].astype(str).str.strip()
+            + " / "
+            + share_df["통번호"].astype(str).str.strip()
+            + "번 통 / "
+            + share_df["품명"].astype(str).str.strip()
+            + "\n"
+            + share_df["변경 전 위치"].astype(str).str.strip()
+            + " → "
+            + share_df["변경 후 위치"].astype(str).str.strip()
+            + "\n"
+            + share_df["변경 전 용량"].astype(int).astype(str)
+            + "kg → "
+            + share_df["변경 후 용량"].astype(int).astype(str)
+            + "kg ("
+            + share_df["변화량"].astype(int).astype(str)
+            + "kg)"
+        )
 
-    # 실제 공유용으로는 요약 컬럼만 사용
-    share_df = share_df[["요약"]]
-
-    st.markdown("### 📱 이동 이력 공유용 요약")
-
-    st.dataframe(
-        share_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "요약": st.column_config.TextColumn(
-                "로트번호 / 통번호 / 품명",
-                width="large",
-            ),
-        },
-    )
-
+        st.dataframe(
+            share_df[["요약"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "요약": st.column_config.TextColumn("요약", width="large"),
+            },
+        )
     
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
