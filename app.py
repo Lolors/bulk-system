@@ -2103,6 +2103,8 @@ def render_tab_move_log():
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
+        if "log_page_slider" in ss:
+            del ss["log_page_slider"]
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -2134,6 +2136,14 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
+
+    # ✅ 슬라이더 상태값도 범위 안으로 보정 (필터/삭제로 total_pages가 줄어도 안전)
+    if "log_page_slider" in ss:
+        try:
+            ss["log_page_slider"] = int(ss["log_page_slider"])
+        except Exception:
+            ss["log_page_slider"] = 1
+        ss["log_page_slider"] = min(max(1, ss["log_page_slider"]), total_pages)    
 
     # 페이지 슬라이더
     ss["log_page"] = st.slider(
