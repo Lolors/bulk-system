@@ -2154,6 +2154,9 @@ def render_tab_move_log():
     # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
     page_df = df_view.iloc[start:end].copy()
 
+    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
+    page_df = df_view.iloc[start:end].copy()
+
     # =========================
     # 📱 모바일 공유용 보기 (요약)
     # =========================
@@ -2161,7 +2164,11 @@ def render_tab_move_log():
 
     colm1, colm2 = st.columns([1, 2])
     with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
+        ss["log_mobile_view"] = st.toggle(
+            "📱 모바일 공유용 보기",
+            value=ss["log_mobile_view"],
+            key="log_mobile_view_toggle",
+        )
     with colm2:
         st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 줄바꿈/카드형으로 표시합니다.")
 
@@ -2172,37 +2179,46 @@ def render_tab_move_log():
         mobile_cols = [
             "시간",
             "ID",
+            "품명",
             "로트번호",
             "통번호",
             "변경 전 용량",
             "변경 후 용량",
+            "변화량",
             "변경 전 위치",
             "변경 후 위치",
         ]
         mobile_cols = [c for c in mobile_cols if c in page_df.columns]
         mdf = page_df[mobile_cols].copy()
 
-        # 보기 좋게 숫자 포맷(옵션)
-        for c in ["변경 전 용량", "변경 후 용량"]:
+        # ✅ nan -> 공백
+        mdf = mdf.fillna("")
+
+        # ✅ 숫자 컬럼 정리 (보기 좋게)
+        for c in ["통번호", "변경 전 용량", "변경 후 용량", "변화량"]:
             if c in mdf.columns:
-                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
+                mdf[c] = pd.to_numeric(mdf[c], errors="coerce").fillna(0)
 
         # ✅ 카드형 리스트로 출력 (카톡 공유 최적)
         for _, r in mdf.iterrows():
-            t = str(r.get("시간", ""))
-            uid = str(r.get("ID", ""))
-            lot = str(r.get("로트번호", ""))
-            drum = str(r.get("통번호", ""))
-            oldq = r.get("변경 전 용량", "")
-            newq = r.get("변경 후 용량", "")
-            oldloc = str(r.get("변경 전 위치", ""))
-            newloc = str(r.get("변경 후 위치", ""))
+            t = str(r.get("시간", "")).strip()
+            uid = str(r.get("ID", "")).strip()
+            lot = str(r.get("로트번호", "")).strip()
+            drum = int(r.get("통번호", 0)) if r.get("통번호", "") != "" else ""
+            name = str(r.get("품명", "")).strip()
+
+            oldq = int(r.get("변경 전 용량", 0))
+            newq = int(r.get("변경 후 용량", 0))
+            delta = int(r.get("변화량", oldq - newq))  # 없으면 계산값으로
+
+            oldloc = str(r.get("변경 전 위치", "")).strip()
+            newloc = str(r.get("변경 후 위치", "")).strip()
 
             st.markdown(
                 f"""
-**{lot} / {drum}번 통**  
+**{lot} / {drum}번 통 / {name}**  
 - 시간: {t} / 작성자: {uid}  
-- 용량: {oldq} → {newq} kg  
+- 용량: {oldq} → {newq} kg ({delta}kg)  
 - 위치: {oldloc} → {newloc}
                 """.strip()
             )
