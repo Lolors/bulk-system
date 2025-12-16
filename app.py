@@ -2138,33 +2138,33 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-# =========================
-# 페이지네이션 (안전한 slider 구조)
-# =========================
-page_size = 50
-total_rows = len(df_view)
-total_pages = max(1, math.ceil(total_rows / page_size))
+    # =========================
+    # 페이지네이션 (안전한 slider 구조)
+    # =========================
+    page_size = 50
+    total_rows = len(df_view)
+    total_pages = max(1, math.ceil(total_rows / page_size))
 
-page = st.slider(
-    "페이지 선택",
-    min_value=1,
-    max_value=total_pages,
-    value=1,
-    step=1,
-)
+    page = st.slider(
+        "페이지 선택",
+        min_value=1,
+        max_value=total_pages,
+        value=1,
+        step=1,
+    )
 
-start = (page - 1) * page_size
-end = start + page_size
+    start = (page - 1) * page_size
+    end = start + page_size
 
-# ✅ 원본 인덱스 유지
-page_df = df_view.iloc[start:end].copy()
+    # ✅ 원본 인덱스 유지
+    page_df = df_view.iloc[start:end].copy()
 
-st.markdown(
-    f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
-    f"페이지 {page} / {total_pages} (총 {total_rows}건)"
-    f"</div>",
-    unsafe_allow_html=True,
-)
+    st.markdown(
+        f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
+        f"페이지 {page} / {total_pages} (총 {total_rows}건)"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
     # =========================
