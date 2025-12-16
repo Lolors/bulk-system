@@ -2099,108 +2099,15 @@ def render_tab_move_log():
     ss = st.session_state
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_page", 1)
-
-    def reset_log_filter():
-        ss["log_lot_filter"] = ""
-        ss["log_page"] = 1
-        ss["log_page_slider"] = 1
-        if "log_page_slider" in ss:
-            del ss["log_page_slider"]
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        lot_filter = st.text_input(
-            "로트번호로 검색 (부분 일치)",
-            key="log_lot_filter",
-            placeholder="예: 2E075K",
-        )
-    with col2:
-        st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
-
-    if lot_filter:
-        q = lot_filter.strip().lower()
-        df_tmp = df.copy()
-        df_tmp["lot_lower"] = df_tmp["로트번호"].astype(str).str.lower()
-        df_view = df_tmp[df_tmp["lot_lower"].str.contains(q, na=False)].copy()
-        df_view = df_view.drop(columns=["lot_lower"], errors="ignore")
-    else:
-        df_view = df.copy()
-
-    if df_view.empty:
-        st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
-        return
-
-    # 최신순
-    df_view = df_view.sort_values("시간", ascending=False)
-
-    page_size = 50
-    total_rows = len(df_view)
-    total_pages = max(1, math.ceil(total_rows / page_size))
-    ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
-
-    # ✅ 페이지 값 강제 보정 (slider value 범위 이탈 방지)
-    try:
-        ss["log_page"] = int(ss.get("log_page", 1))
-    except Exception:
-        ss["log_page"] = 1
-
-    ss["log_page"] = min(max(1, ss["log_page"]), total_pages)
-
-    # slider가 이미 세션에 남아있으면 그것도 같이 보정해서 충돌 제거
-    try:
-        ss["log_page_slider"] = int(ss.get("log_page_slider", ss["log_page"]))
-    except Exception:
-        ss["log_page_slider"] = ss["log_page"]
-
-    ss["log_page_slider"] = min(max(1, ss["log_page_slider"]), total_pages)
-
-    # 둘을 동일하게 맞춰서 Streamlit 내부값/외부값 충돌 방지
-    ss["log_page"] = ss["log_page_slider"]
-
-
-    # 페이지 슬라이더
-    ss["log_page"] = st.slider(
-        "페이지 선택",
-        min_value=1,
-        max_value=total_pages,
-        value=ss["log_page_slider"],
-        step=1,
-        key="log_page_slider",
-    )
-
-    start = (ss["log_page"] - 1) * page_size
-    end = start + page_size
-
-    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
-    page_df = df_view.iloc[start:end].copy()
-
-    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
-    page_df = df_view.iloc[start:end].copy()
-
-    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
-    page_df = df_view.iloc[start:end].copy()
-# ==============================
-# 탭 4: 이동 이력 (롤백 전용 / 삭제만 가능)
-# ==============================
-def render_tab_move_log():
-    st.markdown("### 📜 이동 이력 (롤백 전용 / 삭제만 가능)")
-
-    df = load_move_log()
-    if df.empty:
-        st.info("이동 이력이 없습니다.")
-        return
-
-    ss = st.session_state
-    ss.setdefault("log_lot_filter", "")
-    ss.setdefault("log_page", 1)
     ss.setdefault("log_mobile_view", False)
+
+    SLIDER_KEY = "log_page_slider_widget"  # ✅ 위젯 전용 key (세션 값과 분리!)
 
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
         ss["log_mobile_view"] = False
-        if "log_page_slider" in ss:
-            del ss["log_page_slider"]
+        ss.pop(SLIDER_KEY, None)  # ✅ 슬라이더 위젯 상태만 제거
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -2212,7 +2119,9 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # ----- 필터 적용 -----
+    # =========================
+    # 필터 적용
+    # =========================
     if lot_filter:
         q = lot_filter.strip().lower()
         df_tmp = df.copy()
@@ -2229,30 +2138,36 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
+    # =========================
+    # 페이지네이션 (slider 충돌 방지 버전)
+    # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # ✅ 슬라이더 값(세션 key) 보정이 핵심: value가 범위 밖이면 Streamlit이 바로 에러냄
-    ss.setdefault("log_page_slider", 1)
+    # ✅ 현재 페이지값 보정
     try:
-        ss["log_page_slider"] = int(ss.get("log_page_slider", 1) or 1)
+        ss["log_page"] = int(ss.get("log_page", 1) or 1)
     except Exception:
-        ss["log_page_slider"] = 1
+        ss["log_page"] = 1
+    ss["log_page"] = min(max(1, ss["log_page"]), total_pages)
 
-    if ss["log_page_slider"] < 1:
-        ss["log_page_slider"] = 1
-    if ss["log_page_slider"] > total_pages:
-        ss["log_page_slider"] = total_pages
+    # ✅ 슬라이더 위젯이 들고있는 값도 보정(있다면)
+    if SLIDER_KEY in ss:
+        try:
+            ss[SLIDER_KEY] = int(ss.get(SLIDER_KEY, ss["log_page"]) or ss["log_page"])
+        except Exception:
+            ss[SLIDER_KEY] = ss["log_page"]
+        ss[SLIDER_KEY] = min(max(1, ss[SLIDER_KEY]), total_pages)
 
-    # 페이지 슬라이더
+    # ✅ slider는 "위젯 key"만 사용하고, 결과를 log_page에만 반영
     ss["log_page"] = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=ss["log_page_slider"],
+        value=ss.get(SLIDER_KEY, ss["log_page"]),
         step=1,
-        key="log_page_slider",
+        key=SLIDER_KEY,
     )
 
     start = (ss["log_page"] - 1) * page_size
@@ -2269,7 +2184,7 @@ def render_tab_move_log():
     )
 
     # =========================
-    # 📱 모바일 공유용 보기 (토글 ON이면 기본 화면 대신 요약만 보여줌)
+    # 📱 모바일 공유용 보기 (토글 ON이면 기본 화면 대신 요약만)
     # =========================
     colm1, colm2 = st.columns([1, 2])
     with colm1:
@@ -2295,24 +2210,37 @@ def render_tab_move_log():
         mobile_cols = [c for c in mobile_cols if c in page_df.columns]
         mdf = page_df[mobile_cols].copy()
 
-        # nan → 공백 처리
+        # ✅ nan → 공백
         mdf = mdf.where(pd.notna(mdf), "")
 
-        # 숫자 포맷
+        # 숫자 깔끔하게
         for c in ["변경 전 용량", "변경 후 용량", "변화량"]:
             if c in mdf.columns:
-                mdf[c] = pd.to_numeric(mdf[c], errors="coerce").fillna("")
+                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
+                mdf[c] = mdf[c].apply(lambda x: "" if pd.isna(x) else float(x))
+
+        def _fmt_num(v):
+            if v == "" or v is None:
+                return ""
+            try:
+                v = float(v)
+                if v.is_integer():
+                    return str(int(v))
+                return f"{v:.1f}"
+            except Exception:
+                return str(v)
 
         for _, r in mdf.iterrows():
             lot = str(r.get("로트번호", "")).strip()
             drum = str(r.get("통번호", "")).strip()
             name = str(r.get("품명", "")).strip()
+
             t = str(r.get("시간", "")).strip()
             uid = str(r.get("ID", "")).strip()
 
-            oldq = r.get("변경 전 용량", "")
-            newq = r.get("변경 후 용량", "")
-            delta = r.get("변화량", "")
+            oldq = _fmt_num(r.get("변경 전 용량", ""))
+            newq = _fmt_num(r.get("변경 후 용량", ""))
+            delta = _fmt_num(r.get("변화량", ""))
 
             oldloc = str(r.get("변경 전 위치", "")).strip()
             newloc = str(r.get("변경 후 위치", "")).strip()
