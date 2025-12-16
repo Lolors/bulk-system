@@ -2151,62 +2151,40 @@ def render_tab_move_log():
     # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
     page_df = df_view.iloc[start:end].copy()
 
-    # =========================
-    # 📱 모바일 공유용 보기 (요약)
-    # =========================
-    ss.setdefault("log_mobile_view", False)
+    # ==============================
+    # 📱 공유용 요약 데이터 가공
+    # ==============================
 
-    colm1, colm2 = st.columns([1, 2])
-    with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
-    with colm2:
-        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 줄바꿈/카드형으로 표시합니다.")
+    share_df = page_df.copy()
 
-    if ss["log_mobile_view"]:
-        st.markdown("#### 📱 모바일 공유용 요약")
+    # NaN → 공백 처리
+    share_df = share_df.fillna("")
 
-        # 모바일에선 핵심만
-        mobile_cols = [
-            "시간",
-            "ID",
-            "로트번호",
-            "통번호",
-            "변경 전 용량",
-            "변경 후 용량",
-            "변경 전 위치",
-            "변경 후 위치",
-        ]
-        mobile_cols = [c for c in mobile_cols if c in page_df.columns]
-        mdf = page_df[mobile_cols].copy()
+    # "로트번호 / n번 통 / 품명" 형식으로 표시용 컬럼 생성
+    share_df["요약"] = (
+        share_df["로트번호"].astype(str).str.strip()
+        + " / "
+        + share_df["통번호"].astype(str).str.strip()
+        + "번 통 / "
+        + share_df["품명"].astype(str).str.strip()
+    )
 
-        # 보기 좋게 숫자 포맷(옵션)
-        for c in ["변경 전 용량", "변경 후 용량"]:
-            if c in mdf.columns:
-                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
+    # 실제 공유용으로는 요약 컬럼만 사용
+    share_df = share_df[["요약"]]
 
-        # ✅ 카드형 리스트로 출력 (카톡 공유 최적)
-        for _, r in mdf.iterrows():
-            t = str(r.get("시간", ""))
-            uid = str(r.get("ID", ""))
-            lot = str(r.get("로트번호", ""))
-            drum = str(r.get("통번호", ""))
-            oldq = r.get("변경 전 용량", "")
-            newq = r.get("변경 후 용량", "")
-            oldloc = str(r.get("변경 전 위치", ""))
-            newloc = str(r.get("변경 후 위치", ""))
+    st.markdown("### 📱 이동 이력 공유용 요약")
 
-            st.markdown(
-                f"""
-**{lot} / {drum}번 통**  
-- 시간: {t} / 작성자: {uid}  
-- 용량: {oldq} → {newq} kg  
-- 위치: {oldloc} → {newloc}
-                """.strip()
-            )
-            st.divider()
-
-        # 모바일 요약 모드면 아래 원래 편집/삭제 UI는 안 보이게 종료
-        return
+    st.dataframe(
+        share_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "요약": st.column_config.TextColumn(
+                "로트번호 / 통번호 / 품명",
+                width="large",
+            ),
+        },
+    )
 
     
     st.markdown(
