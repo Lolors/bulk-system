@@ -2139,49 +2139,34 @@ def render_tab_move_log():
     df_view = df_view.sort_values("시간", ascending=False)
 
     # =========================
-    # 페이지네이션 (slider 충돌 방지 버전)
+    # 페이지네이션 (안전한 slider 구조)
     # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # ✅ 현재 페이지값 보정
-    try:
-        ss["log_page"] = int(ss.get("log_page", 1) or 1)
-    except Exception:
-        ss["log_page"] = 1
-    ss["log_page"] = min(max(1, ss["log_page"]), total_pages)
-
-    # ✅ 슬라이더 위젯이 들고있는 값도 보정(있다면)
-    if SLIDER_KEY in ss:
-        try:
-            ss[SLIDER_KEY] = int(ss.get(SLIDER_KEY, ss["log_page"]) or ss["log_page"])
-        except Exception:
-            ss[SLIDER_KEY] = ss["log_page"]
-        ss[SLIDER_KEY] = min(max(1, ss[SLIDER_KEY]), total_pages)
-
-    # ✅ slider는 "위젯 key"만 사용하고, 결과를 log_page에만 반영
-    ss["log_page"] = st.slider(
+    # ✅ slider는 slider만 관리 (session_state에 직접 쓰지 않음)
+    page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=ss.get(SLIDER_KEY, ss["log_page"]),
+        value=1,
         step=1,
-        key=SLIDER_KEY,
     )
 
-    start = (ss["log_page"] - 1) * page_size
+    start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
+    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
 
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
-        f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)"
+        f"페이지 {page} / {total_pages} (총 {total_rows}건)"
         f"</div>",
         unsafe_allow_html=True,
     )
+
 
     # =========================
     # 📱 모바일 공유용 보기 (토글 ON이면 기본 화면 대신 요약만)
