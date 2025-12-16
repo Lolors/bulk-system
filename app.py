@@ -2151,6 +2151,64 @@ def render_tab_move_log():
     # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
     page_df = df_view.iloc[start:end].copy()
 
+    # =========================
+    # 📱 모바일 공유용 보기 (요약)
+    # =========================
+    ss.setdefault("log_mobile_view", False)
+
+    colm1, colm2 = st.columns([1, 2])
+    with colm1:
+        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
+    with colm2:
+        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 줄바꿈/카드형으로 표시합니다.")
+
+    if ss["log_mobile_view"]:
+        st.markdown("#### 📱 모바일 공유용 요약")
+
+        # 모바일에선 핵심만
+        mobile_cols = [
+            "시간",
+            "ID",
+            "로트번호",
+            "통번호",
+            "변경 전 용량",
+            "변경 후 용량",
+            "변경 전 위치",
+            "변경 후 위치",
+        ]
+        mobile_cols = [c for c in mobile_cols if c in page_df.columns]
+        mdf = page_df[mobile_cols].copy()
+
+        # 보기 좋게 숫자 포맷(옵션)
+        for c in ["변경 전 용량", "변경 후 용량"]:
+            if c in mdf.columns:
+                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
+
+        # ✅ 카드형 리스트로 출력 (카톡 공유 최적)
+        for _, r in mdf.iterrows():
+            t = str(r.get("시간", ""))
+            uid = str(r.get("ID", ""))
+            lot = str(r.get("로트번호", ""))
+            drum = str(r.get("통번호", ""))
+            oldq = r.get("변경 전 용량", "")
+            newq = r.get("변경 후 용량", "")
+            oldloc = str(r.get("변경 전 위치", ""))
+            newloc = str(r.get("변경 후 위치", ""))
+
+            st.markdown(
+                f"""
+**{lot} / {drum}번 통**  
+- 시간: {t} / 작성자: {uid}  
+- 용량: {oldq} → {newq} kg  
+- 위치: {oldloc} → {newloc}
+                """.strip()
+            )
+            st.divider()
+
+        # 모바일 요약 모드면 아래 원래 편집/삭제 UI는 안 보이게 종료
+        return
+
+    
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
         f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)"
