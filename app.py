@@ -2103,6 +2103,7 @@ def render_tab_move_log():
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
+        ss["log_page_slider"] = 1
         if "log_page_slider" in ss:
             del ss["log_page_slider"]
 
@@ -2137,20 +2138,32 @@ def render_tab_move_log():
     total_pages = max(1, math.ceil(total_rows / page_size))
     ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    # ✅ 슬라이더 상태값도 범위 안으로 보정 (필터/삭제로 total_pages가 줄어도 안전)
-    if "log_page_slider" in ss:
-        try:
-            ss["log_page_slider"] = int(ss["log_page_slider"])
-        except Exception:
-            ss["log_page_slider"] = 1
-        ss["log_page_slider"] = min(max(1, ss["log_page_slider"]), total_pages)    
+    # ✅ 페이지 값 강제 보정 (slider value 범위 이탈 방지)
+    try:
+        ss["log_page"] = int(ss.get("log_page", 1))
+    except Exception:
+        ss["log_page"] = 1
+
+    ss["log_page"] = min(max(1, ss["log_page"]), total_pages)
+
+    # slider가 이미 세션에 남아있으면 그것도 같이 보정해서 충돌 제거
+    try:
+        ss["log_page_slider"] = int(ss.get("log_page_slider", ss["log_page"]))
+    except Exception:
+        ss["log_page_slider"] = ss["log_page"]
+
+    ss["log_page_slider"] = min(max(1, ss["log_page_slider"]), total_pages)
+
+    # 둘을 동일하게 맞춰서 Streamlit 내부값/외부값 충돌 방지
+    ss["log_page"] = ss["log_page_slider"]
+
 
     # 페이지 슬라이더
     ss["log_page"] = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=ss["log_page"],
+        value=ss["log_page_slider"],
         step=1,
         key="log_page_slider",
     )
