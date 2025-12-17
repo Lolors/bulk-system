@@ -2098,17 +2098,18 @@ def render_tab_move_log():
 
     ss = st.session_state
     ss.setdefault("log_lot_filter", "")
-    ss.setdefault("log_page", 1)
     ss.setdefault("log_mobile_view", False)
-
-    SLIDER_KEY = "log_page_slider_widget"  # ✅ 위젯 전용 key (세션 값과 분리!)
 
     def reset_log_filter():
         ss["log_lot_filter"] = ""
-        ss["log_page"] = 1
         ss["log_mobile_view"] = False
-        ss.pop(SLIDER_KEY, None)  # ✅ 슬라이더 위젯 상태만 제거
+        # slider가 관리하는 값(키)도 같이 초기화
+        if "log_page" in ss:
+            del ss["log_page"]
 
+    # ------------------------------
+    # 검색 UI
+    # ------------------------------
     col1, col2 = st.columns([3, 1])
     with col1:
         lot_filter = st.text_input(
@@ -2119,9 +2120,6 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # =========================
-    # 필터 적용
-    # =========================
     if lot_filter:
         q = lot_filter.strip().lower()
         df_tmp = df.copy()
@@ -2138,37 +2136,88 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # =========================
-    # 페이지네이션 (안전한 slider 구조)
-    # =========================
+    # ------------------------------
+    # 페이지네이션 (slider 키는 slider가 전담)
+    # ------------------------------
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # ✅ slider 값은 widget key로만 관리 + 범위 밖이면 생성 전에 보정
+    # slider 기본값(이전 페이지)을 범위 안으로 보정 (위젯 생성 전이라 안전)
+    page_default = ss.get("log_page", 1)
     try:
-        cur_page = int(ss.get(SLIDER_KEY, ss.get("log_page", 1)))
+        page_default = int(page_default)
     except Exception:
-        cur_page = 1
-    cur_page = min(max(1, cur_page), total_pages)
-    ss[SLIDER_KEY] = cur_page  # widget 생성 "전에" 세팅 (범위 이탈 오류 방지)
+        page_default = 1
+    page_default = min(max(1, page_default), total_pages)
+    ss["log_page"] = page_default
 
     page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=cur_page,
+        value=page_default,
         step=1,
-        key=SLIDER_KEY,
+        key="log_page",
     )
-    ss["log_page"] = page
 
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지
+    # ✅ 원본 인덱스 유지 (롤백 정확도)
     page_df = df_view.iloc[start:end].copy()
 
+    # ------------------------------
+    # 📱 모바일 공유용 보기 토글
+    # ------------------------------
+    st.markdown("---")
+    colm1, colm2 = st.columns([1, 2])
+    with colm1:
+        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss.get("log_mobile_view", False))
+    with colm2:
+        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고, 카드형으로 표시합니다.")
+
+    if ss["log_mobile_view"]:
+        st.markdown(
+            f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
+            f"페이지 {page} / {total_pages} (총 {total_rows}건)"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        def _clean(v):
+            return "" if pd.isna(v) else str(v)
+
+        st.markdown("#### 📱 모바일 공유용 요약")
+
+        for _, r in page_df.iterrows():
+            lot = _clean(r.get("로트번호", ""))
+            drum = _clean(r.get("통번호", ""))
+            pname = _clean(r.get("품명", ""))
+            t = _clean(r.get("시간", ""))
+            uid = _clean(r.get("ID", ""))
+            oldq = _clean(r.get("변경 전 용량", ""))
+            newq = _clean(r.get("변경 후 용량", ""))
+            moved = _clean(r.get("변화량", ""))
+            oldloc = _clean(r.get("변경 전 위치", ""))
+            newloc = _clean(r.get("변경 후 위치", ""))
+
+            st.markdown(
+                f"""
+**{lot} / {drum}번 통 / {pname}**  
+- 시간: {t} / 작성자: {uid}  
+- 용량: {oldq} → {newq} kg (변화량: {moved})  
+- 위치: {oldloc} → {newloc}
+""".strip()
+            )
+            st.divider()
+
+        # 모바일 요약 모드에서는 편집/삭제 UI를 숨김
+        return
+
+    # ------------------------------
+    # PC(기본) 화면: 표 + 롤백 삭제
+    # ------------------------------
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
         f"페이지 {page} / {total_pages} (총 {total_rows}건)"
@@ -2176,84 +2225,6 @@ def render_tab_move_log():
         unsafe_allow_html=True,
     )
 
-
-    # =========================
-    # 📱 모바일 공유용 보기 (토글 ON이면 기본 화면 대신 요약만)
-    # =========================
-    colm1, colm2 = st.columns([1, 2])
-    with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
-    with colm2:
-        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
-
-    if ss["log_mobile_view"]:
-        st.markdown("#### 📱 모바일 공유용 요약")
-
-        mobile_cols = [
-            "시간",
-            "ID",
-            "품명",
-            "로트번호",
-            "통번호",
-            "변경 전 용량",
-            "변경 후 용량",
-            "변화량",
-            "변경 전 위치",
-            "변경 후 위치",
-        ]
-        mobile_cols = [c for c in mobile_cols if c in page_df.columns]
-        mdf = page_df[mobile_cols].copy()
-
-        # ✅ nan → 공백
-        mdf = mdf.where(pd.notna(mdf), "")
-
-        # 숫자 깔끔하게
-        for c in ["변경 전 용량", "변경 후 용량", "변화량"]:
-            if c in mdf.columns:
-                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
-                mdf[c] = mdf[c].apply(lambda x: "" if pd.isna(x) else float(x))
-
-        def _fmt_num(v):
-            if v == "" or v is None:
-                return ""
-            try:
-                v = float(v)
-                if v.is_integer():
-                    return str(int(v))
-                return f"{v:.1f}"
-            except Exception:
-                return str(v)
-
-        for _, r in mdf.iterrows():
-            lot = str(r.get("로트번호", "")).strip()
-            drum = str(r.get("통번호", "")).strip()
-            name = str(r.get("품명", "")).strip()
-
-            t = str(r.get("시간", "")).strip()
-            uid = str(r.get("ID", "")).strip()
-
-            oldq = _fmt_num(r.get("변경 전 용량", ""))
-            newq = _fmt_num(r.get("변경 후 용량", ""))
-            delta = _fmt_num(r.get("변화량", ""))
-
-            oldloc = str(r.get("변경 전 위치", "")).strip()
-            newloc = str(r.get("변경 후 위치", "")).strip()
-
-            st.markdown(
-                f"""
-**{lot} / {drum}번 통 / {name}**  
-- 시간: {t} / 작성자: {uid}  
-- 용량: {oldq} → {newq} kg (변화량: {delta})  
-- 위치: {oldloc} → {newloc}
-                """.strip()
-            )
-            st.divider()
-
-        return
-
-    # =========================
-    # 🖥 PC 기본 화면 (표 + 롤백 삭제)
-    # =========================
     cols_order = [
         "시간",
         "ID",
@@ -2268,10 +2239,11 @@ def render_tab_move_log():
         "변경 후 위치",
     ]
     cols_order = [c for c in cols_order if c in page_df.columns]
-    page_df = page_df[cols_order].copy()
+
+    page_edit = page_df[cols_order].copy()
 
     delete_col = "삭제"
-    page_df[delete_col] = False
+    page_edit[delete_col] = False
 
     st.caption(
         "※ LOG는 수정할 수 없습니다. "
@@ -2281,14 +2253,14 @@ def render_tab_move_log():
     )
 
     edited_page = st.data_editor(
-        page_df,
+        page_edit,
         use_container_width=True,
         disabled=cols_order,
         hide_index=True,
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
-        key=f"move_log_editor_page_{ss['log_page']}",
+        key=f"move_log_editor_page_{page}",
     )
 
     def _save_full_log(df_updated: pd.DataFrame):
@@ -2306,6 +2278,7 @@ def render_tab_move_log():
     _, col_delete = st.columns([3, 1])
     with col_delete:
         if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
+            # 1) 선택된 원본 인덱스 추출 (page_df의 인덱스를 그대로 사용)
             if delete_col not in edited_page.columns:
                 st.warning("삭제 컬럼이 없습니다.")
                 return
@@ -2315,6 +2288,7 @@ def render_tab_move_log():
                 st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
                 return
 
+            # 원본(df) 기준으로 해당 행 데이터 확보
             rows_to_delete = df.loc[selected_idx].copy()
 
             # 2) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
@@ -2323,7 +2297,7 @@ def render_tab_move_log():
 
             not_latest = []
             for idx, row in rows_to_delete.iterrows():
-                lot = str(row.get("로트번호", ""))
+                lot = str(row.get("로트번호", "") or "")
                 drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
 
                 mask = (log_all["로트번호"].astype(str) == lot) & (log_all["통번호"] == drum_no)
@@ -2353,7 +2327,7 @@ def render_tab_move_log():
             drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
 
             for _, row in rows_to_delete.iterrows():
-                lot = str(row.get("로트번호", ""))
+                lot = str(row.get("로트번호", "") or "")
                 lot_lower = lot.lower()
                 drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
 
