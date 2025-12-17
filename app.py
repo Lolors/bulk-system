@@ -2150,37 +2150,31 @@ def render_tab_move_log():
     df_view = df_view.sort_values("시간", ascending=False)
 
     # =========================
-    # 페이지네이션 (slider key stale 값 완전 제거 방식)
+     # =========================
+    # 페이지네이션 (selectbox 방식: 검색해도 절대 안 터짐)
     # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    SLIDER_KEY = "log_page_slider_v2"
+    PAGE_KEY = "log_page_select_v1"
 
-    # ✅ 1페이지면 slider를 만들면 안 됨 (min=max=1 → Streamlit 예외)
-    if total_pages == 1:
-        page = 1
-        ss.pop(SLIDER_KEY, None)  # 남아있던 slider 상태도 정리
-    else:
-        # ✅ 기존에 저장된 slider 값이 범위 밖이면 삭제(pop)
-        if SLIDER_KEY in ss:
-            try:
-                _p = int(ss.get(SLIDER_KEY, 1))
-            except Exception:
-                _p = 1
+    # 이전 선택값(있으면) 복구 + 범위 보정
+    prev_page = ss.get(PAGE_KEY, 1)
+    try:
+        prev_page = int(prev_page)
+    except Exception:
+        prev_page = 1
+    prev_page = min(max(1, prev_page), total_pages)
 
-            if _p < 1 or _p > total_pages:
-                ss.pop(SLIDER_KEY, None)
+    page_options = list(range(1, total_pages + 1))
 
-        page = st.slider(
-            "페이지 선택",
-            min_value=1,
-            max_value=total_pages,
-            value=int(ss.get(SLIDER_KEY, 1)) if SLIDER_KEY in ss else 1,
-            step=1,
-            key=SLIDER_KEY,
-        )
+    page = st.selectbox(
+        "페이지 선택",
+        options=page_options,
+        index=page_options.index(prev_page),
+        key=PAGE_KEY,
+    )
 
     start = (page - 1) * page_size
     end = start + page_size
