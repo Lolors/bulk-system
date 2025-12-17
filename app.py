@@ -2099,10 +2099,14 @@ def render_tab_move_log():
     ss = st.session_state
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_mobile_view", False)
-
+    
     def reset_log_filter():
         ss["log_lot_filter"] = ""
+        ss.pop("log_page_slider_v2", None)
+        ss["log_mobile_view"] = False
         ss["log_page"] = 1
+        st.rerun()
+
 
     # ------------------------------
     # 검색 UI
@@ -2140,18 +2144,19 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    SLIDER_KEY = "log_page"
-
-    # ✅ 세션 값 준비
+    SLIDER_KEY = "log_page_slider_v2"   # ✅ 기존 키랑 충돌 방지용(중요!)
     ss.setdefault(SLIDER_KEY, 1)
 
-    # ✅ (중요) total_pages가 줄어들어도 session_state 값이 범위를 벗어나지 않게 보정
+    # ✅ total_pages가 줄어들면, slider 값이 범위 밖으로 나가서 터짐 → slider 호출 전에 무조건 보정
     try:
         ss[SLIDER_KEY] = int(ss.get(SLIDER_KEY, 1))
     except Exception:
         ss[SLIDER_KEY] = 1
-    ss[SLIDER_KEY] = max(1, min(ss[SLIDER_KEY], total_pages))
 
+    if ss[SLIDER_KEY] < 1 or ss[SLIDER_KEY] > total_pages:
+        ss[SLIDER_KEY] = 1
+
+    # 페이지 슬라이더
     page = st.slider(
         "페이지 선택",
         min_value=1,
@@ -2164,66 +2169,71 @@ def render_tab_move_log():
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지
+    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
     page_df = df_view.iloc[start:end].copy()
 
-    # ------------------------------
-    # 📱 모바일 공유용 보기 토글
-    # ------------------------------
-    st.markdown("---")
+    # =========================
+    # 📱 모바일 공유용 보기 (토글)
+    # =========================
+    ss.setdefault("log_mobile_view", False)
+
     colm1, colm2 = st.columns([1, 2])
     with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss.get("log_mobile_view", False))
+        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
     with colm2:
-        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고, 카드형으로 표시합니다.")
+        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
 
     if ss["log_mobile_view"]:
-        st.markdown(
-            f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
-            f"페이지 {page} / {total_pages} (총 {total_rows}건)"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-        def _clean(v):
-            return "" if pd.isna(v) else str(v)
-
         st.markdown("#### 📱 모바일 공유용 요약")
 
-        for _, r in page_df.iterrows():
-            lot = _clean(r.get("로트번호", ""))
-            drum = _clean(r.get("통번호", ""))
-            pname = _clean(r.get("품명", ""))
-            t = _clean(r.get("시간", ""))
-            uid = _clean(r.get("ID", ""))
-            oldq = _clean(r.get("변경 전 용량", ""))
-            newq = _clean(r.get("변경 후 용량", ""))
-            moved = _clean(r.get("변화량", ""))
-            oldloc = _clean(r.get("변경 전 위치", ""))
-            newloc = _clean(r.get("변경 후 위치", ""))
+        mobile_cols = [
+            "시간",
+            "ID",
+            "품명",
+            "로트번호",
+            "통번호",
+            "변경 전 용량",
+            "변경 후 용량",
+            "변경 전 위치",
+            "변경 후 위치",
+        ]
+        mobile_cols = [c for c in mobile_cols if c in page_df.columns]
+        mdf = page_df[mobile_cols].copy()
+
+        # NaN → 공백 처리
+        mdf = mdf.fillna("")
+
+        for _, r in mdf.iterrows():
+            t = str(r.get("시간", "")).strip()
+            uid = str(r.get("ID", "")).strip()
+            name = str(r.get("품명", "")).strip()
+            lot = str(r.get("로트번호", "")).strip()
+            drum = str(r.get("통번호", "")).strip()
+            oldq = str(r.get("변경 전 용량", "")).strip()
+            newq = str(r.get("변경 후 용량", "")).strip()
+            oldloc = str(r.get("변경 전 위치", "")).strip()
+            newloc = str(r.get("변경 후 위치", "")).strip()
 
             st.markdown(
                 f"""
-**{lot} / {drum}번 통 / {pname}**  
+**{lot} / {drum}번 통 / {name}**  
 - 시간: {t} / 작성자: {uid}  
-- 용량: {oldq} → {newq} kg (변화량: {moved})  
+- 용량: {oldq} → {newq} kg  
 - 위치: {oldloc} → {newloc}
-""".strip()
+                """.strip()
             )
             st.divider()
 
-        # 모바일 요약 모드에서는 편집/삭제 UI를 숨김
         return
 
-    # ------------------------------
-    # PC(기본) 화면: 표 + 롤백 삭제
-    # ------------------------------
+    # (PC 기본 화면용 페이지 표시)
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
         f"페이지 {page} / {total_pages} (총 {total_rows}건)"
         f"</div>",
         unsafe_allow_html=True,
     )
+
 
     cols_order = [
         "시간",
