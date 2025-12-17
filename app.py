@@ -2102,9 +2102,8 @@ def render_tab_move_log():
     
     def reset_log_filter():
         ss["log_lot_filter"] = ""
-        ss.pop("log_page_slider_v2", None)
-        ss["log_mobile_view"] = False
-        ss["log_page"] = 1
+        ss.pop("log_page_slider_v2", None)   # ✅ 이 키로!
+        ss.pop("log_mobile_view", None)
         st.rerun()
 
 
@@ -2138,30 +2137,30 @@ def render_tab_move_log():
     df_view = df_view.sort_values("시간", ascending=False)
 
     # =========================
-    # 페이지네이션 (안전한 slider 구조)
+    # 페이지네이션 (slider key stale 값 완전 제거 방식)
     # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    SLIDER_KEY = "log_page_slider_v2"   # ✅ 기존 키랑 충돌 방지용(중요!)
-    ss.setdefault(SLIDER_KEY, 1)
+    SLIDER_KEY = "log_page_slider_v2"
 
-    # ✅ total_pages가 줄어들면, slider 값이 범위 밖으로 나가서 터짐 → slider 호출 전에 무조건 보정
-    try:
-        ss[SLIDER_KEY] = int(ss.get(SLIDER_KEY, 1))
-    except Exception:
-        ss[SLIDER_KEY] = 1
+    # ✅ 기존에 저장된 slider 값이 범위 밖이면, 보정하지 말고 아예 삭제(pop)
+    if SLIDER_KEY in ss:
+        try:
+            _p = int(ss.get(SLIDER_KEY, 1))
+        except Exception:
+            _p = 1
 
-    if ss[SLIDER_KEY] < 1 or ss[SLIDER_KEY] > total_pages:
-        ss[SLIDER_KEY] = 1
+        if _p < 1 or _p > total_pages:
+            ss.pop(SLIDER_KEY, None)
 
-    # 페이지 슬라이더
+    # ✅ 이제 slider 생성 (value는 "기본값"만 제공)
     page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=ss[SLIDER_KEY],
+        value=1,
         step=1,
         key=SLIDER_KEY,
     )
@@ -2169,7 +2168,7 @@ def render_tab_move_log():
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스를 유지해야 롤백/삭제가 정확함
+    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
 
     # =========================
