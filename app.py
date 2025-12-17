@@ -2145,13 +2145,23 @@ def render_tab_move_log():
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
+    # ✅ slider 값은 widget key로만 관리 + 범위 밖이면 생성 전에 보정
+    try:
+        cur_page = int(ss.get(SLIDER_KEY, ss.get("log_page", 1)))
+    except Exception:
+        cur_page = 1
+    cur_page = min(max(1, cur_page), total_pages)
+    ss[SLIDER_KEY] = cur_page  # widget 생성 "전에" 세팅 (범위 이탈 오류 방지)
+
     page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=1,
+        value=cur_page,
         step=1,
+        key=SLIDER_KEY,
     )
+    ss["log_page"] = page
 
     start = (page - 1) * page_size
     end = start + page_size
