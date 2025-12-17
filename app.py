@@ -2084,7 +2084,7 @@ def render_tab_map():
         use_container_width=True,
     )
 
-# ==============================
+## ==============================
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
 
@@ -2098,14 +2098,17 @@ def render_tab_move_log():
 
     ss = st.session_state
     ss.setdefault("log_lot_filter", "")
+    ss.setdefault("log_lot_filter_prev", "")
     ss.setdefault("log_mobile_view", False)
-    
+
+    SLIDER_KEY = "log_page_slider_v2"
+
     def reset_log_filter():
         ss["log_lot_filter"] = ""
-        ss.pop("log_page_slider_v2", None)   # ✅ 이 키로!
+        ss["log_lot_filter_prev"] = ""
+        ss.pop(SLIDER_KEY, None)
         ss.pop("log_mobile_view", None)
         st.rerun()
-
 
     # ------------------------------
     # 검색 UI
@@ -2120,6 +2123,16 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
+    # ✅ 검색어 변경 감지 → 페이지 슬라이더 상태 리셋 (가장 중요)
+    cur_filter = (lot_filter or "").strip().lower()
+    prev_filter = (ss.get("log_lot_filter_prev") or "").strip().lower()
+    if cur_filter != prev_filter:
+        ss["log_lot_filter_prev"] = cur_filter
+        ss.pop(SLIDER_KEY, None)
+
+    # ------------------------------
+    # 필터 적용
+    # ------------------------------
     if lot_filter:
         q = lot_filter.strip().lower()
         df_tmp = df.copy()
@@ -2137,30 +2150,26 @@ def render_tab_move_log():
     df_view = df_view.sort_values("시간", ascending=False)
 
     # =========================
-    # 페이지네이션 (slider key stale 값 완전 제거 방식)
+    # 페이지네이션
     # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    SLIDER_KEY = "log_page_slider_v2"
-
-    # ✅ 기존에 저장된 slider 값이 범위 밖이면, 보정하지 말고 아예 삭제(pop)
+    # ✅ session_state에 남아있는 slider 값이 범위 밖이면 제거
     if SLIDER_KEY in ss:
         try:
-            _p = int(ss.get(SLIDER_KEY, 1))
+            p_old = int(ss.get(SLIDER_KEY, 1))
         except Exception:
-            _p = 1
-
-        if _p < 1 or _p > total_pages:
+            p_old = 1
+        if p_old < 1 or p_old > total_pages:
             ss.pop(SLIDER_KEY, None)
 
-    # ✅ 이제 slider 생성 (value는 "기본값"만 제공)
     page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=1,
+        value=int(ss.get(SLIDER_KEY, 1)) if SLIDER_KEY in ss else 1,
         step=1,
         key=SLIDER_KEY,
     )
@@ -2168,17 +2177,15 @@ def render_tab_move_log():
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지
+    # ✅ 원본 인덱스 유지 (삭제/롤백 정확도)
     page_df = df_view.iloc[start:end].copy()
 
     # =========================
     # 📱 모바일 공유용 보기 (토글)
     # =========================
-    ss.setdefault("log_mobile_view", False)
-
     colm1, colm2 = st.columns([1, 2])
     with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
+        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss.get("log_mobile_view", False))
     with colm2:
         st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
 
@@ -2197,10 +2204,7 @@ def render_tab_move_log():
             "변경 후 위치",
         ]
         mobile_cols = [c for c in mobile_cols if c in page_df.columns]
-        mdf = page_df[mobile_cols].copy()
-
-        # NaN → 공백 처리
-        mdf = mdf.fillna("")
+        mdf = page_df[mobile_cols].copy().fillna("")
 
         for _, r in mdf.iterrows():
             t = str(r.get("시간", "")).strip()
@@ -2225,14 +2229,15 @@ def render_tab_move_log():
 
         return
 
-    # (PC 기본 화면용 페이지 표시)
+    # =========================
+    # PC 기본 화면
+    # =========================
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
         f"페이지 {page} / {total_pages} (총 {total_rows}건)"
         f"</div>",
         unsafe_allow_html=True,
     )
-
 
     cols_order = [
         "시간",
@@ -2248,7 +2253,6 @@ def render_tab_move_log():
         "변경 후 위치",
     ]
     cols_order = [c for c in cols_order if c in page_df.columns]
-
     page_edit = page_df[cols_order].copy()
 
     delete_col = "삭제"
@@ -2287,7 +2291,6 @@ def render_tab_move_log():
     _, col_delete = st.columns([3, 1])
     with col_delete:
         if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
-            # 1) 선택된 원본 인덱스 추출 (page_df의 인덱스를 그대로 사용)
             if delete_col not in edited_page.columns:
                 st.warning("삭제 컬럼이 없습니다.")
                 return
@@ -2297,10 +2300,8 @@ def render_tab_move_log():
                 st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
                 return
 
-            # 원본(df) 기준으로 해당 행 데이터 확보
             rows_to_delete = df.loc[selected_idx].copy()
 
-            # 2) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
             log_all = df.copy()
             log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
 
@@ -2331,7 +2332,6 @@ def render_tab_move_log():
                 )
                 return
 
-            # 3) 통 정보 CSV 롤백 (통용량/현재위치만)
             drums_df = load_drums()
             drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
 
@@ -2356,7 +2356,6 @@ def render_tab_move_log():
             drums_df = drums_df.drop(columns=["lot_lower"], errors="ignore")
             save_drums(drums_df)
 
-            # 4) 이동 로그에서 행 삭제 + 저장
             df_updated = df.drop(index=selected_idx)
             _save_full_log(df_updated)
 
