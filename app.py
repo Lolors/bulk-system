@@ -2150,34 +2150,42 @@ def render_tab_move_log():
     df_view = df_view.sort_values("시간", ascending=False)
 
     # =========================
-    # 페이지네이션
+    # 페이지네이션 (slider key stale 값 완전 제거 방식)
     # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # ✅ session_state에 남아있는 slider 값이 범위 밖이면 제거
-    if SLIDER_KEY in ss:
-        try:
-            p_old = int(ss.get(SLIDER_KEY, 1))
-        except Exception:
-            p_old = 1
-        if p_old < 1 or p_old > total_pages:
-            ss.pop(SLIDER_KEY, None)
+    SLIDER_KEY = "log_page_slider_v2"
 
-    page = st.slider(
-        "페이지 선택",
-        min_value=1,
-        max_value=total_pages,
-        value=int(ss.get(SLIDER_KEY, 1)) if SLIDER_KEY in ss else 1,
-        step=1,
-        key=SLIDER_KEY,
-    )
+    # ✅ 1페이지면 slider를 만들면 안 됨 (min=max=1 → Streamlit 예외)
+    if total_pages == 1:
+        page = 1
+        ss.pop(SLIDER_KEY, None)  # 남아있던 slider 상태도 정리
+    else:
+        # ✅ 기존에 저장된 slider 값이 범위 밖이면 삭제(pop)
+        if SLIDER_KEY in ss:
+            try:
+                _p = int(ss.get(SLIDER_KEY, 1))
+            except Exception:
+                _p = 1
+
+            if _p < 1 or _p > total_pages:
+                ss.pop(SLIDER_KEY, None)
+
+        page = st.slider(
+            "페이지 선택",
+            min_value=1,
+            max_value=total_pages,
+            value=int(ss.get(SLIDER_KEY, 1)) if SLIDER_KEY in ss else 1,
+            step=1,
+            key=SLIDER_KEY,
+        )
 
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지 (삭제/롤백 정확도)
+    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
 
     # =========================
