@@ -2102,10 +2102,7 @@ def render_tab_move_log():
 
     def reset_log_filter():
         ss["log_lot_filter"] = ""
-        ss["log_mobile_view"] = False
-        # slider가 관리하는 값(키)도 같이 초기화
-        if "log_page" in ss:
-            del ss["log_page"]
+        ss["log_page"] = 1
 
     # ------------------------------
     # 검색 UI
@@ -2136,35 +2133,38 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # ------------------------------
-    # 페이지네이션 (slider 키는 slider가 전담)
-    # ------------------------------
+    # =========================
+    # 페이지네이션 (안전한 slider 구조)
+    # =========================
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # slider 기본값(이전 페이지)을 범위 안으로 보정 (위젯 생성 전이라 안전)
-    page_default = ss.get("log_page", 1)
+    SLIDER_KEY = "log_page"
+
+    # ✅ 세션 값 준비
+    ss.setdefault(SLIDER_KEY, 1)
+
+    # ✅ (중요) total_pages가 줄어들어도 session_state 값이 범위를 벗어나지 않게 보정
     try:
-        page_default = int(page_default)
+        ss[SLIDER_KEY] = int(ss.get(SLIDER_KEY, 1))
     except Exception:
-        page_default = 1
-    page_default = min(max(1, page_default), total_pages)
-    ss["log_page"] = page_default
+        ss[SLIDER_KEY] = 1
+    ss[SLIDER_KEY] = max(1, min(ss[SLIDER_KEY], total_pages))
 
     page = st.slider(
         "페이지 선택",
         min_value=1,
         max_value=total_pages,
-        value=page_default,
+        value=ss[SLIDER_KEY],
         step=1,
-        key="log_page",
+        key=SLIDER_KEY,
     )
 
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지 (롤백 정확도)
+    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
 
     # ------------------------------
