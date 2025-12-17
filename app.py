@@ -1,17 +1,15 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date
 import io
 import math
-import boto3
+import tempfile
+from google.cloud import vision
+from google.oauth2 import service_account
+import re
+import hashlib
 
-KST = timezone(timedelta(hours=9))
-
-def now_kst_str() -> str:
-    """한국 시간(KST) 현재 시각을 'YYYY-MM-DD HH:MM:SS' 문자열로 반환."""
-    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-    
 # ==============================
 # 사용자 계정 (로그인용)
 # ==============================
@@ -19,7 +17,6 @@ USER_ACCOUNTS = {
     "ps": {"password": "0000", "display_name": "임필선"},
     "by": {"password": "0000", "display_name": "강봉연"},
     "hn": {"password": "0000", "display_name": "김한나"},
-    "se": {"password": "0000", "display_name": "이성은"},
 }
 
 # ==============================
@@ -39,19 +36,10 @@ st.markdown(
         max-width: 160px !important;
         min-width: 160px !important;
     }
-
-    /* 🔹 st.form 테두리/배경 제거 */
-    .stForm {
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0 !important;
-        background-color: transparent !important;
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
-
 
 CSV_PATH = "bulk_drums_extended.csv"   # 품목코드~현재위치까지 들어있는 파일
 PRODUCTION_FILE = "production.xlsx"    # 자사: 작업번호 → 로트/제조량
@@ -62,6 +50,8 @@ STOCK_FILE = "stock.xlsx"              # 전산 재고
 # ==============================
 # S3 연동 설정
 # ==============================
+import boto3
+
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "bulk-system-enc")
 S3_PREFIX = os.getenv("S3_PREFIX", "bulk-app/")  # 폴더 경로
 
@@ -131,12 +121,249 @@ def s3_download_bytes(filename: str):
 
 
 # ==============================
+# 바코드 인식 (Dynamsoft DBR 전용 - CaptureVisionRouter 사용)
+# ==============================
+try:
+    from PIL import Image, ImageOps, ImageEnhance
+except ImportError:
+    Image = None
+    ImageOps = None
+    ImageEnhance = None
+
+# Dynamsoft Barcode Reader Python SDK (v10~)
+try:
+    from dynamsoft_barcode_reader_bundle import (
+        LicenseManager,
+        CaptureVisionRouter,
+        EnumPresetTemplate,
+        EnumErrorCode,
+    )
+except ImportError:
+    LicenseManager = None
+    CaptureVisionRouter = None
+    EnumPresetTemplate = None
+    EnumErrorCode = None
+
+
+def load_dbr_license():
+    """
+    DBR 라이선스 키 로드:
+    1) st.secrets["DBR_LICENSE"]
+    2) 환경변수 DBR_LICENSE
+    """
+    lic = ""
+    try:
+        lic = st.secrets.get("DBR_LICENSE", "")
+    except Exception:
+        lic = ""
+    if not lic:
+        lic = os.getenv("DBR_LICENSE", "")
+    if not lic:
+        st.warning("DBR 라이선스 키를 찾을 수 없습니다. st.secrets 또는 환경변수 DBR_LICENSE에 등록해 주세요.")
+    return lic
+
+
+DBR_LICENSE = load_dbr_license()
+
+_DBR_CVR = None
+_DBR_LICENSE_INIT = False
+
+
+def get_dbr_router():
+    """LicenseManager + CaptureVisionRouter 초기화해서 전역으로 재사용."""
+    global _DBR_CVR, _DBR_LICENSE_INIT
+
+    if CaptureVisionRouter is None or LicenseManager is None or EnumErrorCode is None:
+        return None
+
+    if not _DBR_LICENSE_INIT:
+        try:
+            err_code, err_str = LicenseManager.init_license(DBR_LICENSE)
+        except Exception:
+            return None
+
+        if err_code not in (
+            EnumErrorCode.EC_OK,
+            getattr(EnumErrorCode, "EC_LICENSE_CACHE_USED", EnumErrorCode.EC_OK),
+            getattr(EnumErrorCode, "EC_LICENSE_WARNING", EnumErrorCode.EC_OK),
+        ):
+            return None
+
+        _DBR_LICENSE_INIT = True
+
+    if _DBR_CVR is None:
+        try:
+            _DBR_CVR = CaptureVisionRouter()
+        except Exception:
+            return None
+
+    return _DBR_CVR
+
+
+def preprocess_for_barcode(pil_img):
+    """
+    흐릿한 라벨용 전처리.
+    - 원본 비율 유지
+    - 너무 작은 이미지는 확대
+    """
+    if Image is None:
+        return pil_img
+
+    img = pil_img.copy()
+
+    # 너무 작은 이미지는 확대
+    min_side = min(img.size)
+    if min_side < 800:
+        scale = 800.0 / float(min_side)
+        new_size = (int(img.width * scale), int(img.height * scale))
+        img = img.resize(new_size, Image.LANCZOS)
+
+    return img
+
+
+def dbr_decode(pil_img):
+    """
+    Dynamsoft DBR(CaptureVisionRouter)로 바코드 디코딩.
+    - PIL 이미지를 임시 파일로 저장
+    - 파일 경로를 capture()에 넘겨서 공식 샘플 방식 그대로 사용
+    - 성공하면 [(포맷, 텍스트), ...] 리스트를 반환
+    """
+    cvr = get_dbr_router()
+    if cvr is None or EnumPresetTemplate is None or EnumErrorCode is None:
+        return []
+
+    # 전처리: 크기만 최소 800px 맞춰줌 (너무 작으면 확대)
+    img = pil_img.copy()
+    if Image is not None:
+        min_side = min(img.size)
+        if min_side < 800:
+            scale = 800.0 / float(min_side)
+            new_size = (int(img.width * scale), int(img.height * scale))
+            img = img.resize(new_size, Image.LANCZOS)
+
+    # 1) 임시 파일에 저장 (PNG)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+            img.save(tmp_path, format="PNG")
+
+        # 2) 공식 샘플 방식: 파일 경로 + EnumPresetTemplate.value 사용
+        result = cvr.capture(tmp_path, EnumPresetTemplate.PT_READ_BARCODES.value)
+
+        # 3) 에러 코드 체크
+        err_code = result.get_error_code()
+        if err_code not in (
+            EnumErrorCode.EC_OK,
+            getattr(EnumErrorCode, "EC_UNSUPPORTED_JSON_KEY_WARNING", EnumErrorCode.EC_OK),
+        ):
+            return []
+
+        barcode_result = result.get_decoded_barcodes_result()
+        if barcode_result is None or barcode_result.get_items() == 0:
+            return []
+
+        items = barcode_result.get_items()
+        codes = []
+        for item in items:
+            try:
+                text = (item.get_text() or "").strip()
+                fmt = (item.get_format_string() or "").strip()
+            except Exception:
+                text, fmt = "", ""
+            if text:
+                codes.append((fmt, text))
+
+        return codes
+
+    except Exception:
+        return []
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+# ==============================
+# Google Cloud Vision OCR
+# ==============================
+_VISION_CLIENT = None
+
+
+def get_vision_client():
+    """st.secrets에 저장된 서비스 계정 정보를 이용해 Vision 클라이언트 생성."""
+    global _VISION_CLIENT
+    if _VISION_CLIENT is not None:
+        return _VISION_CLIENT
+
+    info = st.secrets.get("gcp_service_account", None)
+    if not info:
+        st.warning("gcp_service_account 시크릿을 찾을 수 없습니다.")
+        return None
+
+    creds = service_account.Credentials.from_service_account_info(dict(info))
+    _VISION_CLIENT = vision.ImageAnnotatorClient(credentials=creds)
+    return _VISION_CLIENT
+
+
+def gcv_ocr_full_text(pil_img):
+    """이미지 전체 텍스트를 Google Cloud Vision으로 OCR."""
+    client = get_vision_client()
+    if client is None:
+        return ""
+
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    content = buf.getvalue()
+
+    image = vision.Image(content=content)
+
+    try:
+        response = client.text_detection(image=image)
+    except Exception as e:
+        st.error(f"Google Vision 호출 중 오류: {e}")
+        return ""
+
+    if response.error.message:
+        st.error(f"Google Vision 에러: {response.error.message}")
+        return ""
+
+    texts = response.text_annotations
+    if not texts:
+        return ""
+
+    # 첫 번째 항목이 전체 텍스트
+    return texts[0].description.strip()
+
+
+def extract_barcode_like_code(text: str) -> str:
+    """
+    OCR 결과에서 바코드 밑 코드처럼 생긴 문자열만 뽑아낸다.
+    예: H20240221-0010 형태 (알파벳 1자 + 숫자8 + '-' + 숫자4)
+    """
+    if not text:
+        return ""
+
+    compact = text.replace(" ", "").replace("\n", "")
+    m = re.search(r"[A-Z]\d{8}-\d{4}", compact)
+    if m:
+        return m.group(0)
+
+    # 패턴이 확실치 않으면, 숫자/하이픈 많이 섞인 덩어리 중 하나라도 반환
+    m2 = re.search(r"[A-Z0-9\-]{8,}", compact)
+    return m2.group(0) if m2 else ""
+
+
+# ==============================
 # 공통 유틸 (업로드/로컬/S3 겸용)
 # ==============================
 @st.cache_data(show_spinner=False)
 def _load_drums_core(bulk_bytes):
     """bulk_drums_extended.csv 로드 (세션 업로드 > 로컬 > S3 순서)."""
-    # 1) 세션 업로드 우선
+    # 1) 세션에 업로드된 파일이 있으면 그걸 우선 사용
     if bulk_bytes is not None:
         try:
             df = pd.read_csv(io.BytesIO(bulk_bytes))
@@ -144,12 +371,18 @@ def _load_drums_core(bulk_bytes):
             st.error(f"업로드한 bulk_drums_extended.csv를 읽는 중 오류가 발생했습니다: {e}")
             return pd.DataFrame(
                 columns=[
-                    "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-                    "상태", "통번호", "통용량", "현재위치",
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
                 ]
             )
-
-    # 2) 로컬
+    # 2) 업로드 파일이 없고, 로컬 CSV가 있으면 그걸 사용
     elif os.path.exists(CSV_PATH):
         try:
             df = pd.read_csv(CSV_PATH)
@@ -157,12 +390,18 @@ def _load_drums_core(bulk_bytes):
             st.error(f"CSV 파일을 읽는 중 오류가 발생했습니다: {e}")
             return pd.DataFrame(
                 columns=[
-                    "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-                    "상태", "통번호", "통용량", "현재위치",
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
                 ]
             )
-
-    # 3) S3
+    # 3) 로컬도 없으면 S3에서 시도
     else:
         s3_bytes = s3_download_bytes(CSV_PATH)
         if s3_bytes is not None:
@@ -172,52 +411,58 @@ def _load_drums_core(bulk_bytes):
                 st.error(f"S3의 bulk_drums_extended.csv를 읽는 중 오류가 발생했습니다: {e}")
                 return pd.DataFrame(
                     columns=[
-                        "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-                        "상태", "통번호", "통용량", "현재위치",
+                        "품목코드",
+                        "품명",
+                        "로트번호",
+                        "제품라인",
+                        "제조일자",
+                        "상태",
+                        "통번호",
+                        "통용량",
+                        "현재위치",
                     ]
                 )
         else:
             return pd.DataFrame(
                 columns=[
-                    "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-                    "상태", "통번호", "통용량", "현재위치",
+                    "품목코드",
+                    "품명",
+                    "로트번호",
+                    "제품라인",
+                    "제조일자",
+                    "상태",
+                    "통번호",
+                    "통용량",
+                    "현재위치",
                 ]
             )
 
-    # 필수 컬럼 체크
     required_cols = [
-        "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-        "상태", "통번호", "통용량", "현재위치",
+        "품목코드",
+        "품명",
+        "로트번호",
+        "제품라인",
+        "제조일자",
+        "상태",
+        "통번호",
+        "통용량",
+        "현재위치",
     ]
     for c in required_cols:
         if c not in df.columns:
             st.error(f"CSV에 '{c}' 열이 없습니다. 엑셀에서 다시 추출해 주세요.")
             return pd.DataFrame(columns=required_cols)
 
-    # 타입 보정
     df["통번호"] = pd.to_numeric(df["통번호"], errors="coerce").fillna(0).astype(int)
     df["통용량"] = pd.to_numeric(df["통용량"], errors="coerce").fillna(0.0).astype(float)
 
-    # 현재위치 정규화
-    def norm_loc(x) -> str:
+    def norm_loc(x: str) -> str:
         if pd.isna(x):
             return ""
         s = str(x).strip()
-        if not s:
-            return ""
-
-        # 특수 구역: 그대로 (미지정 붙이면 안 됨)
-        if s in ["외주", "폐기", "소진", "창고"]:
-            return s
-
-        # 예전 데이터 호환: "4층-A1" -> "4층 A1"
-        if "-" in s:
-            s = s.replace("-", " ", 1).strip()
-
-        # 층만 들어온 경우 -> "X층 미지정"
-        if s in ["2층", "4층", "5층", "6층"]:
-            return f"{s} 미지정"
-
+        if "-" not in s:
+            if s in ["2층", "4층", "5층", "6층"]:
+                return f"{s}-A1"
         return s
 
     df["현재위치"] = df["현재위치"].apply(norm_loc)
@@ -257,63 +502,6 @@ def save_drums(df: pd.DataFrame):
 
     # 3) S3 업로드
     s3_upload_bytes(CSV_PATH, data)
-
-# ==============================
-# 위치 카테고리 (지도/이동 공통)
-# ==============================
-FLOOR_ZONES = {
-    "2층": ["A", "B", "C", "D", "E", "미지정"],
-    "4층": ["블리스터", "로타리", "덕용", "미지정"],
-    "5층": ["기초", "덕용", "미지정"],
-    "6층": ["스틱&파우치", "스킨팩", "미지정"],
-}
-SPECIAL_AREAS = ["외주", "폐기", "소진", "창고"]  # 미지정 붙이지 않음
-
-def location_picker(key_prefix: str) -> str:
-    """
-    지도 탭과 동일한 카테고리로 '현재위치' 문자열을 만든다.
-    - 특수구역: 외주 / 폐기 / 소진 / 창고 → 그대로 반환
-    - 층 선택 시: 세부구역 선택, 없으면 '미지정'
-    - 층 변경 시 세부구역 자동 리셋
-    """
-
-    # 1️⃣ 최상위 선택 (층 + 특수구역 통합)
-    top_options = list(FLOOR_ZONES.keys()) + SPECIAL_AREAS
-
-    top_key = f"{key_prefix}_top"
-    zone_key = f"{key_prefix}_zone"
-    last_top_key = f"{key_prefix}_last_top"
-
-    top = st.selectbox(
-        "이동하실 위치를 선택해 주세요.",
-        top_options,
-        key=top_key,
-    )
-
-    # 2️⃣ 특수구역이면 바로 반환
-    if top in SPECIAL_AREAS:
-        return top
-
-    # 3️⃣ 층이 바뀌면 세부구역 선택값 리셋
-    prev_top = st.session_state.get(last_top_key)
-    if prev_top != top:
-        st.session_state.pop(zone_key, None)
-        st.session_state[last_top_key] = top
-
-    # 4️⃣ 세부구역 선택
-    zones = FLOOR_ZONES.get(top, ["미지정"])
-    zone = st.selectbox(
-        "세부구역 선택",
-        zones,
-        key=zone_key,
-    )
-
-    # 5️⃣ fallback
-    z = (zone or "").strip()
-    if not z:
-        z = "미지정"
-
-    return f"{top} {z}"
 
 
 @st.cache_data(show_spinner=False)
@@ -547,7 +735,7 @@ def ensure_lot_in_csv(
                 "상태": initial_status or "생산대기",
                 "통번호": int(d["통번호"]),
                 "통용량": float(d["통용량"]),
-                "현재위치": "2층 미지정",
+                "현재위치": "미지정",
             }
         )
 
@@ -614,40 +802,11 @@ def load_move_log() -> pd.DataFrame:
     move_bytes = ss.get("move_log_csv_bytes", None)
     return _load_move_log_core(move_bytes)
 
-def save_move_log(df: pd.DataFrame):
-    """
-    이동 이력 DataFrame 전체를 bulk_move_log.csv 및 세션/S3에 저장.
-    (기존 내용을 유지한 채 덮어쓰기 방식으로 전체 저장)
-    """
-    ss = st.session_state
-
-    buf = io.BytesIO()
-    df.to_csv(buf, index=False, encoding="utf-8-sig")
-    data = buf.getvalue()
-
-    # 세션에 반영
-    ss["move_log_csv_bytes"] = data
-
-    # 캐시 클리어
-    _load_move_log_core.clear()
-
-    # 로컬 CSV 저장
-    try:
-        df.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
-    except Exception:
-        pass
-
-    # S3 업로드
-    s3_upload_bytes(MOVE_LOG_CSV, data)
-
-
 
 def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zone: str, to_zone: str):
     """
     이동 이력을 bulk_move_log.csv에 기록.
-    drum_infos:
-      - 옛 형식: (통번호, moved_qty, old_qty, new_qty)
-      - 새 형식: (통번호, moved_qty, old_qty, new_qty, old_loc)
+    drum_infos: [(통번호, moved_qty, old_qty, new_qty), ...]
     ID 열에는 로그인한 사용자의 '표시 이름'을 남긴다.
     """
     if not drum_infos:
@@ -656,17 +815,9 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
     ss = st.session_state
     user_display_name = ss.get("user_name", "")
 
-    ts = now_kst_str()  # 🔹 한국 시간 기준
-
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
-    for info in drum_infos:
-        # 🔹 튜플 길이에 따라 분기 (옛 데이터와 호환)
-        if len(info) == 4:
-            drum_no, moved_qty, old_qty, new_qty = info
-            old_loc = from_zone
-        else:
-            drum_no, moved_qty, old_qty, new_qty, old_loc = info
-
+    for drum_no, moved_qty, old_qty, new_qty in drum_infos:
         rows.append(
             {
                 "시간": ts,
@@ -678,7 +829,7 @@ def write_move_log(item_code: str, item_name: str, lot: str, drum_infos, from_zo
                 "변경 전 용량": old_qty,
                 "변경 후 용량": new_qty,
                 "변화량": moved_qty,
-                "변경 전 위치": old_loc,
+                "변경 전 위치": from_zone,
                 "변경 후 위치": to_zone,
             }
         )
@@ -735,46 +886,35 @@ from datetime import datetime as dt_for_caption
 @st.cache_data(show_spinner=False, ttl=60)
 def last_upload_caption(filename: str) -> str:
     """
-    파일의 마지막 업로드 시간을 KST(UTC+9) 시간으로 표시
-    1) S3 → 2) 로컬 파일 → 3) 없으면 표시 없음
+    1) S3 객체가 있으면 그 객체의 LastModified 시간을 표시
+    2) 없으면 로컬 파일 수정시간을 표시
+    3) 둘 다 없으면 '업로드된 파일 없음'
     """
-    from datetime import timezone, timedelta, datetime as dt
-
-    # KST timezone
-    KST = timezone(timedelta(hours=9))
-
-    # ------------------------
-    # 1) S3 timestamp
-    # ------------------------
+    # 1) S3 LastModified -----------------------------------------
     try:
         if s3_enabled():
             client = get_s3_client()
             if client:
                 s3_path = _s3_key(filename)
                 resp = client.head_object(Bucket=S3_BUCKET_NAME, Key=s3_path)
-
-                lm = resp["LastModified"]     # timezone-aware datetime
-                lm_kst = lm.astimezone(KST)   # 👉 KST 로 변환
-
-                return f"S3 마지막 수정: {lm_kst.strftime('%Y-%m-%d %H:%M:%S')}"
+                lm = resp["LastModified"]  # timezone aware datetime
+                ts_str = lm.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                return f"S3 마지막 수정: {ts_str}"
     except Exception:
         pass
 
-    # ------------------------
-    # 2) Local file timestamp
-    # ------------------------
+    # 2) 로컬 파일 mtime -----------------------------------------
     if os.path.exists(filename):
         try:
-            ts = os.path.getmtime(filename)        # float (UTC 기준 timestamp)
-            lm_kst = dt.fromtimestamp(ts, KST)     # 👉 timestamp 를 KST 로 변환
-            return f"로컬 마지막 수정: {lm_kst.strftime('%Y-%m-%d %H:%M:%S')}"
+            ts = os.path.getmtime(filename)
+            dt = dt_for_caption.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            return f"로컬 마지막 수정: {dt}"
         except Exception:
             return "로컬 파일 시간 읽기 오류"
 
-    # ------------------------
-    # 3) No file
-    # ------------------------
+    # 3) 둘 다 없음 ----------------------------------------------
     return "업로드된 파일이 없습니다."
+
 
 # ==============================
 # 데이터 파일 업로드 화면 (최초 1회용)
@@ -869,6 +1009,13 @@ def render_file_loader():
         if move_bytes is not None:
             s3_upload_bytes(MOVE_LOG_CSV, move_bytes)
 
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.caption(last_upload_caption(CSV_PATH))
+        st.caption(last_upload_caption(PRODUCTION_FILE))
+        st.caption(last_upload_caption(RECEIVE_FILE))
+        st.caption(last_upload_caption(STOCK_FILE))
+        st.caption(last_upload_caption(MOVE_LOG_CSV))
+
         # ---------- 2) 서버 로컬 파일로도 저장 (이후 세션에서 재사용) ----------
         try:
             _load_drums_core.clear()
@@ -918,221 +1065,199 @@ def render_file_loader():
 # ==============================
 def render_login():
     ss = st.session_state
-
-    # 🔹 이전에 로그인했던 ID가 있으면 기본값으로 넣어주기
-    #    (단, 이번 세션에서 login_id가 아직 안 만들어졌을 때만)
-    if "last_login_id" in ss and "login_id" not in ss:
-        ss["login_id"] = ss["last_login_id"]
-
     st.title("🏭 벌크 관리 시스템 - 로그인")
+
     st.markdown("작업 전 ID와 비밀번호를 입력해 주세요.")
 
-    # ✅ form 사용: 엔터로도 로그인, 버튼으로도 로그인
-    with st.form("login_form"):
-        login_id = st.text_input("ID", key="login_id")
-        login_pw = st.text_input("비밀번호", type="password", key="login_pw")
+    login_id = st.text_input("ID", key="login_id")
+    login_pw = st.text_input("비밀번호", type="password", key="login_pw")
 
-        login_submitted = st.form_submit_button("로그인")
-
-    # 폼 제출(엔터 또는 버튼 클릭) 시 로그인 처리
-    if login_submitted:
+    # 엔터로 로그인 가능하도록 처리
+    if login_id and login_pw:
         user = USER_ACCOUNTS.get((login_id or "").strip())
-
         if user and login_pw == user["password"]:
             ss["user_id"] = (login_id or "").strip()
             ss["user_name"] = user["display_name"]
-
-            # 🔹 마지막에 성공적으로 로그인한 ID 기억
-            ss["last_login_id"] = (login_id or "").strip()
-
-            # 혹시 예전에 쓰던 로그인 유지 관련 키가 있다면 정리 (선택 사항)
-            for k in ["remember_me", "login_remember_checkbox"]:
-                if k in ss:
-                    del ss[k]
-
             st.success(f"{user['display_name']}님, 환영합니다.")
             st.rerun()
+
         else:
             st.error("ID 또는 비밀번호가 올바르지 않습니다.")
-
+            
+# ==============================
+# (생략됐던) get_stock_summary 더미 정의
+# ==============================
 def get_stock_summary(item_code: str, lot: str):
     """
-    stock.xlsx에서 '품번 + 로트번호' 기준으로 전산 재고 요약을 구한다.
-
-    stock.xlsx 컬럼 구조 (중요):
-      - A열: 창고/작업장
-      - B열: 창고/작업장명
-      - C열: 품번
-      - G열: 로트번호
-      - K열: 실재고수량
+    원래 코드에 있던 get_stock_summary가 질문 코드에는 없어서
+    최소한의 더미로 넣어 둡니다.
+    실제 전산 재고 연동 로직이 있다면 이 부분을 교체해 주세요.
     """
-    stock_df = load_stock()
-    if stock_df is None or stock_df.empty:
-        return None, ""
-
-    df = stock_df.copy()
-
-    # 필수 컬럼만 남기고, 이름 통일
-    required_cols = ["창고/작업장", "창고/작업장명", "품번", "로트번호", "실재고수량"]
-    for c in required_cols:
-        if c not in df.columns:
-            # 필요한 컬럼이 하나라도 없으면 요약 불가
-            return None, ""
-
-    # 문자열 정리
-    df["품번"] = df["품번"].astype(str).str.strip()
-    df["로트번호"] = df["로트번호"].astype(str).str.strip().str.upper()
-
-    item_key = str(item_code).strip()
-    lot_key = str(lot).strip().upper()
-
-    # 품번 + 로트번호 완전 일치
-    df = df[(df["품번"] == item_key) & (df["로트번호"] == lot_key)]
-
-    if df.empty:
-        return None, ""
-
-    # 실재고수량 숫자화 + 0 제외
-    df["실재고수량"] = pd.to_numeric(df["실재고수량"], errors="coerce").fillna(0)
-    df = df[df["실재고수량"] != 0]
-
-    if df.empty:
-        return None, ""
-
-    # ----- 대분류 매핑 -----
-    ONSITE_CODES = {"WC301", "WC501", "WC502", "WC503", "WC504"}
-    WAREHOUSE_CODES = {"WH201", "WH701", "WH301", "WH601", "WH401", "WH506"}
-    DEFECT_CODES = {"WH001", "WH102"}
-
-    def classify(code: str) -> str:
-        code = str(code).strip()
-        if code in ONSITE_CODES:
-            return "자사"
-        if code in WAREHOUSE_CODES:
-            return "창고"
-        if code in DEFECT_CODES:
-            return "불량"
-        return "외주"
-
-    df["대분류"] = df["창고/작업장"].apply(classify)
-
-    # 화면에서 쓰기 좋게 컬럼 이름 정리
-    summary = df[["창고/작업장", "창고/작업장명", "품번", "로트번호", "실재고수량", "대분류"]].copy()
-    summary = summary.rename(
-        columns={
-            "창고/작업장": "창고코드",
-            "창고/작업장명": "창고명",
-        }
-    )
-
-    # 재고 많은 순으로 정렬
-    summary = summary.sort_values("실재고수량", ascending=False).reset_index(drop=True)
-
-    return summary, ""
+    return None, ""
 
 
-
-
-# ==============================
-# 탭 1: 이동 - 입력값 초기화
-# ==============================
-def clear_move_inputs():
-    """이동 탭 입력값/검색 상태 초기화 콜백."""
-    ss = st.session_state
-
-    for k in [
-        "mv_last_lot",
-        "mv_last_barcode",
-        "mv_search_by_lot",
-        "mv_searched_csv",
-        "mv_show_stock_detail",
-        "mv_show_move_history_here",
-        "clicked_zone_csv",
-        "mv_just_searched",
-    ]:
-        if k in ss:
-            del ss[k]
-
-            
 # ==============================
 # 탭 1: 이동
 # ==============================
+def clear_move_inputs():
+    """조회/초기화 버튼 옆에서 사용할 입력값 초기화 콜백."""
+    ss = st.session_state
+    ss["mv_barcode"] = ""
+    ss["mv_lot"] = ""
+    ss["mv_scanned_barcode"] = ""
+    ss.pop("mv_last_scan_hash", None)   # 🔹 이미지 해시도 초기화
+
+
 def render_tab_move():
     st.markdown("### 📦 벌크 이동")
 
     ss = st.session_state
+    ss.setdefault("mv_scanned_barcode", "")
     ss.setdefault("mv_searched_csv", False)
     ss.setdefault("mv_search_by_lot", False)
+    ss.setdefault("mv_last_lot", "")
+    ss.setdefault("mv_last_barcode", "")
     ss.setdefault("mv_show_stock_detail", False)
     ss.setdefault("mv_show_move_history_here", False)
-    ss.setdefault("mv_input_version", 0)
-    input_ver = ss["mv_input_version"]
 
-    # 🔹 벌크 구분은 폼 밖에서 즉시 반영되게
     bulk_type = st.radio(
         "벌크 구분을 선택해 주세요.",
         ["자사", "사급"],
         horizontal=True,
         key="mv_bulk_type_csv",
     )
+    barcode_label = "작업번호를 입력해 주세요." if bulk_type == "자사" else "입하번호를 입력해 주세요."
 
-    # ================== 검색 폼 (엔터 + 버튼 둘 다 가능) ==================
-    with st.form("move_search_form"):
-        barcode_label = (
-            "작업번호를 입력해 주세요."
-            if bulk_type == "자사"
-            else "입하번호를 입력해 주세요."
+    # ================== 상단 입력 ==================
+
+    # 1줄: 작업번호/입하번호 + 로트번호 (기존 그대로)
+    col_in1, col_in2, _sp = st.columns([0.49, 0.49, 2.5])
+
+    with col_in1:
+        barcode = st.text_input(
+            barcode_label,
+            key="mv_barcode",
+            placeholder="예: W24012345",
         )
 
-        # 🔹 입력칸 두 개 나란히
-        col_in1, col_in2, _sp = st.columns([0.45, 0.45, 2.5])
-        with col_in1:
-            barcode = st.text_input(
-                barcode_label,
-                key=f"mv_barcode_{input_ver}",
-                placeholder="예: W24012345",
-            )
-        with col_in2:
-            lot_input = st.text_input(
-                "로트번호",
-                key=f"mv_lot_{input_ver}",
-                placeholder="예: 2E075K",
-            )
+    with col_in2:
+        lot_input = st.text_input(
+            "로트번호",
+            key="mv_lot",
+            placeholder="예: 2E075K",
+        )
 
-        # 🔹 조회하기 / 초기화 버튼 한 줄
-        col_b1, col_b2, _sp2 = st.columns([1, 1, 6])
-        with col_b1:
-            search_submit = st.form_submit_button("조회하기", use_container_width=True)
-        with col_b2:
-            reset_submit = st.form_submit_button("초기화", use_container_width=True)
+    # ================== 바코드 스캔 업로드 ==================
+    st.write("")
 
-    # ----- 초기화 버튼 처리 -----
-    if reset_submit:
-        clear_move_inputs()          # 검색 상태 초기화 (입력칸은 버전으로 리셋)
-        ss["mv_input_version"] += 1  # 👉 새 키로 위젯 재생성 → 값 완전 삭제
-        st.rerun()
+    scan_col, _ = st.columns([1.2, 3])
 
-    # ----- 조회 버튼: 이번 입력을 "마지막 조회 조건"으로 저장 -----
-    if search_submit:
-        lot_val = (lot_input or "").strip()
+    with scan_col:
+        st.caption("📷 라벨 사진 업로드")
+
+        scan_file = st.file_uploader(
+            "바코드 이미지 업로드",
+            type=["png", "jpg", "jpeg"],
+            key="mv_barcode_image",
+        )
+
+        image_bytes = None
+        image_name = None
+
+        if scan_file is not None:
+            image_bytes = scan_file.read()
+            image_name = scan_file.name
+
+        # ================== DBR + Vision 디코딩 (이미지당 1번만) ==================
+        if image_bytes is not None:
+            # 현재 이미지의 해시 계산
+            img_hash = hashlib.md5(image_bytes).hexdigest()
+            prev_hash = ss.get("mv_last_scan_hash")
+
+            # 새로운 이미지일 때만 인식 수행
+            if img_hash != prev_hash:
+                ss["mv_last_scan_hash"] = img_hash
+
+                try:
+                    img_raw = Image.open(io.BytesIO(image_bytes))
+
+                    img_display = img_raw.copy()
+                    st.image(img_display, caption=image_name, width=220)
+
+                    # 1차: DBR
+                    codes = dbr_decode(img_raw)
+                    text_code = ""
+
+                    if codes:
+                        _, text_code = codes[0]
+                        text_code = text_code.strip()
+
+                    # 2차: DBR 실패하면 Vision OCR
+                    if not text_code:
+                        full_text = gcv_ocr_full_text(img_raw)
+                        ocr_code = extract_barcode_like_code(full_text)
+                        text_code = ocr_code.strip()
+
+                    if text_code:
+                        ss["mv_scanned_barcode"] = text_code
+                        st.success(f"인식됨: {text_code}")
+                    else:
+                        st.warning("바코드를 인식하지 못했습니다.")
+
+                except Exception as e:
+                    st.error(f"이미지를 처리하는 중 오류 발생: {e}")
+
+            else:
+                # 같은 이미지는 이미 인식 끝난 상태
+                if ss.get("mv_scanned_barcode"):
+                    st.info(f"이미 인식된 바코드: {ss['mv_scanned_barcode']}")
+
+    # ================== 3줄: 조회 / 초기화 버튼 ==================
+    st.write("")
+    btn_col1, btn_col2, _ = st.columns([0.5, 0.5, 3])
+
+    search_clicked = False
+    with btn_col1:
+        if st.button("조회하기", key="mv_search_btn_csv"):
+            search_clicked = True
+
+    with btn_col2:
+        st.button("초기화", key="mv_clear_btn", on_click=clear_move_inputs)
+
+    # 조회 버튼 처리
+    if "search_clicked" in locals() and search_clicked:
         barcode_val = (barcode or "").strip()
+        lot_val = (lot_input or "").strip()
+        scanned_val = ss.get("mv_scanned_barcode", "").strip()
+
+        if not lot_val and not barcode_val and not scanned_val:
+            st.warning("먼저 작업번호/입하번호 또는 로트번호를 입력(또는 바코드를 스캔)해 주세요.")
+            ss["mv_searched_csv"] = False
+            return
+
+        search_by_lot = bool(lot_val)
+
+        if not search_by_lot:
+            if not barcode_val and scanned_val:
+                barcode_val = scanned_val
 
         ss["mv_last_lot"] = lot_val
         ss["mv_last_barcode"] = barcode_val
-        ss["mv_search_by_lot"] = bool(lot_val)  # 로트가 있으면 로트 기준 조회
+        ss["mv_search_by_lot"] = search_by_lot
         ss["mv_searched_csv"] = True
-        ss["mv_just_searched"] = True
+        ss["mv_scanned_barcode"] = ""
+        ss["mv_show_move_history_here"] = False
 
-    # 🔹 한 번도 조회한 적 없으면 아래는 안 그림
-    if not ss.get("mv_searched_csv", False):
+    if not ss["mv_searched_csv"]:
         return
 
-    # 여기부터는 "마지막 조회 조건" 기반으로 항상 화면 그림
-    bulk_type = ss.get("mv_bulk_type_csv", "자사")
+    # ===================== 검색 후 로직 =====================
     df = load_drums()
+    df["lot_lower"] = df["로트번호"].astype(str).str.lower()
     prod_df = load_production()
     recv_df = load_receive()
 
+    search_by_lot = ss.get("mv_search_by_lot", False)
     lot = ""
     item_code = ""
     item_name = ""
@@ -1140,24 +1265,14 @@ def render_tab_move():
     prod_qty = None
     line = ""
     barcode_used = ""
-    lot_lower = ""
 
-    search_by_lot = ss.get("mv_search_by_lot", False)
-
-    # ================== 로트 / 작업번호 / 입하번호 해석 ==================
     if search_by_lot:
-        lot_input = (ss.get("mv_last_lot") or "").strip()
-        if not lot_input:
+        lot = (ss.get("mv_last_lot") or "").strip()
+        if not lot:
             st.warning("로트번호가 비어 있습니다.")
             ss["mv_searched_csv"] = False
             return
-
-        # LOT는 항상 대문자로 저장
-        lot = lot_input.upper()
-        # 검색용 LOT는 소문자로
-        lot_lower = lot_input.lower()
-        barcode_used = lot_input
-
+        barcode_used = lot
     else:
         barcode_query = (ss.get("mv_last_barcode") or "").strip()
         if not barcode_query:
@@ -1165,31 +1280,24 @@ def render_tab_move():
             ss["mv_searched_csv"] = False
             return
 
-        barcode_used = barcode_query
-        q = barcode_query.strip().lower()
-
         if bulk_type == "자사":
             if prod_df.empty:
-                st.error("production.xlsx 파일을 읽을 수 없어 작업번호 기반 조회 불가합니다.")
+                st.error("production.xlsx 파일을 읽을 수 없어서 작업번호 기반 조회를 할 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            prod_df["_작번_norm"] = prod_df["작업번호"].astype(str).str.strip().str.lower()
-            hit = prod_df[prod_df["_작번_norm"] == q]
-
+            hit = prod_df[prod_df["작업번호"].astype(str) == barcode_query]
             if hit.empty:
                 st.warning("해당 작업번호를 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
             r = hit.iloc[0]
-
-            lot = str(r["LOTNO"]).strip().upper()
-            lot_lower = lot.lower()
-            item_code = str(r["품번"]).strip()
-            item_name = str(r["품명"]).strip()
+            lot = str(r["LOTNO"])
+            item_code = str(r["품번"])
+            item_name = str(r["품명"])
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
-            prod_date = "" if pd.isna(r["작업일자"]) else str(r["작업일자"])
+            prod_date = str(r["작업일자"])
             line = classify_product_line(item_code)
 
             df = ensure_lot_in_csv(
@@ -1204,35 +1312,38 @@ def render_tab_move():
             )
             save_drums(df)
 
-        else:
-            # 사급
+        else:  # 사급
             if recv_df.empty:
-                st.error("receive.xlsx 파일을 읽을 수 없습니다.")
+                st.error("receive.xlsx 파일을 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
-            recv_df["_입하_norm"] = recv_df["입하번호"].astype(str).str.strip().str.lower()
-            hit = recv_df[recv_df["_입하_norm"] == q]
+            if "입하번호" not in recv_df.columns:
+                st.error("receive.xlsx에 '입하번호' 열이 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
 
+            hit = recv_df[recv_df["입하번호"].astype(str) == barcode_query]
             if hit.empty:
-                st.warning("해당 입하번호를 찾을 수 없습니다.")
+                st.warning("해당 입하번호를 receive.xlsx에서 찾을 수 없습니다.")
                 ss["mv_searched_csv"] = False
                 return
 
             r = hit.iloc[0]
+            if "품번" not in recv_df.columns or "품명" not in recv_df.columns or "로트번호" not in recv_df.columns:
+                st.error("receive.xlsx에 품번/품명/로트번호 관련 열이 없습니다.")
+                ss["mv_searched_csv"] = False
+                return
 
-            item_code = str(r["품번"]).strip()
-            item_name = str(r["품명"]).strip()
-            lot = str(r["로트번호"]).strip().upper()
-            lot_lower = lot.lower()
+            item_code = str(r["품번"])
+            item_name = str(r["품명"])
+            lot = str(r["로트번호"])
 
-            # 입하량 → 제조량처럼 사용
             if "입하량" in recv_df.columns:
                 prod_qty = float(r["입하량"]) if not pd.isna(r["입하량"]) else None
             else:
                 prod_qty = None
 
-            # 제조일자 계열 처리
             if "제조일자" in recv_df.columns:
                 prod_date = "" if pd.isna(r["제조일자"]) else str(r["제조일자"])
             elif "제조년월일" in recv_df.columns:
@@ -1240,30 +1351,7 @@ def render_tab_move():
             else:
                 prod_date = ""
 
-            # stock.xlsx에서 유/무상 자동 판단
-            line = "사급"
-            trade_type = ""
-
-            try:
-                stock_df = load_stock()
-            except Exception:
-                stock_df = pd.DataFrame()
-
-            if not stock_df.empty:
-                cond = (
-                    stock_df["품번"].astype(str).str.strip() == item_code
-                ) & (
-                    stock_df["로트번호"].astype(str).str.strip().str.upper() == lot
-                )
-
-                sub = stock_df[cond]
-                if not sub.empty and "유/무상" in sub.columns:
-                    trade_type = str(sub.iloc[0]["유/무상"]).strip()
-
-            # stock에 없으면 receive의 값 사용
-            if not trade_type:
-                trade_type = str(r.get("유/무상", "")).strip()
-
+            trade_type = str(r.get("유/무상", "")).strip()
             if trade_type == "유상":
                 line = "사급(유상)"
             elif trade_type == "무상":
@@ -1283,60 +1371,12 @@ def render_tab_move():
             )
             save_drums(df)
 
-            # ==============================
-            # stock.xlsx 기준으로 유/무상 판단
-            # ==============================
-            line = "사급"  # 기본값
+        barcode_used = barcode_query
 
-            try:
-                stock_df = load_stock()
-            except Exception:
-                stock_df = pd.DataFrame()
-
-            trade_type = ""
-
-            if not stock_df.empty:
-                # 컬럼명: A=창고/작업장, B=창고/작업장명, C=품번, G=로트번호, K=실재고수량, T=유/무상
-                # → 여기서 C(품번), G(로트번호), T(유/무상) 사용
-                cond = (
-                    stock_df["품번"].astype(str) == item_code
-                ) & (
-                    stock_df["로트번호"].astype(str) == lot
-                )
-
-                sub = stock_df[cond]
-                if not sub.empty and "유/무상" in sub.columns:
-                    # 여러 행이면 첫 행 기준
-                    trade_type = str(sub.iloc[0]["유/무상"]).strip()
-
-            # stock에 값이 없으면 receive의 유/무상을 백업으로 사용
-            if not trade_type:
-                trade_type = str(r.get("유/무상", "")).strip()
-
-            if trade_type == "유상":
-                line = "사급(유상)"
-            elif trade_type == "무상":
-                line = "사급(무상)"
-            else:
-                line = "사급"
-
-            df = ensure_lot_in_csv(
-                df,
-                lot=lot,
-                item_code=item_code,
-                item_name=item_name,
-                line=line,
-                mfg_date=prod_date,
-                initial_status="생산대기",
-                prod_qty=prod_qty,
-            )
-            save_drums(df)
-
-    # ---------- LOT 기준으로 CSV 조회 (대소문자 무시) ----------
     df = load_drums()
     df["lot_lower"] = df["로트번호"].astype(str).str.lower()
+    lot_lower = (lot or "").lower()
     lot_df = df[df["lot_lower"] == lot_lower].copy()
-
     if lot_df.empty:
         st.warning("CSV에서 해당 로트번호의 통 정보를 찾을 수 없습니다.")
         ss["mv_searched_csv"] = False
@@ -1396,8 +1436,6 @@ def render_tab_move():
 
     lot_df = lot_df.sort_values("통번호")
 
-    lot_df = lot_df.sort_values("통번호")
-
     loc_unique = lot_df["현재위치"].dropna().unique().tolist()
     if len(loc_unique) == 1:
         current_zone = loc_unique[0]
@@ -1406,34 +1444,12 @@ def render_tab_move():
     else:
         current_zone = "혼합"
 
-    # stock.xlsx 기반 전산 재고 요약
-    stock_summary_df, _ = get_stock_summary(item_code, lot)
-
+    stock_summary_df, stock_summary_text = get_stock_summary(item_code, lot)
     if stock_summary_df is not None and not stock_summary_df.empty:
-        parts = []
-
-        for _, r in stock_summary_df.iterrows():
-            qty = r.get("실재고수량", 0)
-            if pd.isna(qty):
-                continue
-
-            qty_int = int(float(qty))
-            if qty_int == 0:
-                continue
-
-            cat = str(r.get("대분류", "")).strip()
-            wh_name = str(r.get("창고명", "")).strip()
-
-            # 예: 창고(양성창고) 570kg
-            parts.append(f"{cat}({wh_name}) {qty_int}kg")
-
-        stock_loc_display = ", ".join(parts) if parts else current_zone
+        top = stock_summary_df.iloc[0]
+        stock_loc_display = f"{top['대분류']}({top['창고명']})"
     else:
         stock_loc_display = current_zone
-
-    # 이동에 사용할 변수 (좌/우 컬럼에서 같이 씀)
-    selected_drums = []
-    drum_new_qty = {}
 
     col_left2, col_right2 = st.columns(2)
 
@@ -1453,65 +1469,46 @@ def render_tab_move():
             """
         )
 
-        # 현재 위치(전산 기준) + 이동이력 버튼을 한 줄에
-        loc_col, btn_col, _sp = st.columns([6, 2, 4])
-
-        with loc_col:
+        # 현재 위치 + [상세보기] + [이동이력] 버튼
+        loc_col1, loc_col2 = st.columns([3, 2])
+        with loc_col1:
             st.markdown(f"**현재 위치(전산 기준):** {stock_loc_display}")
+        with loc_col2:
+            b1_col, b_sp, b2_col = st.columns([1, 0.05, 1])
+            # ✅ 항상 보이는 상세보기 버튼
+            with b1_col:
+                if st.button("상세보기", key=f"stock_detail_btn_{lot}"):
+                    ss["mv_show_stock_detail"] = not ss.get("mv_show_stock_detail", False)
+            with b2_col:
+                if st.button("이동이력", key=f"move_hist_btn_{lot}"):
+                    ss["mv_show_move_history_here"] = not ss.get("mv_show_move_history_here", False)
 
-        with btn_col:
-            if st.button("이동이력", key=f"move_hist_btn_{lot}"):
-                ss["mv_show_move_history_here"] = not ss.get(
-                    "mv_show_move_history_here", False
-                )
-
-        # 🔎 전산 재고 상세 ❌ 이 부분만 숨김 (필요할 때만 True로 바꾸면 됨)
-        show_stock_detail = False
-
-        if show_stock_detail:
+        # ✅ 전산 재고 상세 토글
+        if ss.get("mv_show_stock_detail", False):
             if stock_summary_df is not None and not stock_summary_df.empty:
                 st.markdown("#### 🔎 전산 재고 상세")
-
-                detail_df = stock_summary_df.copy()
-                detail_df = detail_df[
-                    ["창고코드", "창고명", "실재고수량"]
-                ].reset_index(drop=True)
-
-                header_height = 40
-                row_height = 32
-                n_rows = len(detail_df)
-                table_height = header_height + row_height * max(n_rows, 1)
-
-                st.dataframe(
-                    detail_df,
-                    use_container_width=True,
-                    height=table_height,
-                )
+                st.dataframe(stock_summary_df, use_container_width=True, height=240)
             else:
                 st.info("전산 재고 데이터가 없습니다.")
 
-
-        # 🔴 여기부터는 상세보기와 상관없이 항상 보여야 하는 영역
-        st.markdown("### ✅ 통 선택 및 잔량 입력")
+        st.markdown("### 🛢 통 선택 및 잔량 입력")
 
         selected_drums = []
         drum_new_qty = {}
 
-        # ✅ index 기준으로 key를 만들어서 중복 방지
-        lot_df = lot_df.reset_index(drop=True)
-        index_list = lot_df.index.tolist()
-
-        c1, c_sp, c2, _c_gap = st.columns([1, 0.001, 1, 5])
+        drum_list = lot_df["통번호"].tolist()
+        # 모두 선택 / 모두 해제
+        c1, c_sp, c2, _c_gap = st.columns([2, 0.5, 2, 7])
         with c1:
             if st.button("모두 선택", key=f"mv_select_all_{lot}", use_container_width=False):
-                for idx in index_list:
-                    st.session_state[f"mv_sel_{lot}_{idx}"] = True
+                for dn in drum_list:
+                    st.session_state[f"mv_sel_{lot}_{dn}"] = True
         with c2:
             if st.button("모두 해제", key=f"mv_select_none_{lot}", use_container_width=False):
-                for idx in index_list:
-                    st.session_state[f"mv_sel_{lot}_{idx}"] = False
+                for dn in drum_list:
+                    st.session_state[f"mv_sel_{lot}_{dn}"] = False
 
-        for idx, row in lot_df.iterrows():
+        for _, row in lot_df.iterrows():
             drum_no = int(row["통번호"])
             old_qty = float(row["통용량"])
             drum_loc = str(row.get("현재위치", "") or "").strip()
@@ -1521,7 +1518,7 @@ def render_tab_move():
             else:
                 label = f"{drum_no}번 통 — 기존 {old_qty:.0f}kg"
 
-            cb_key = f"mv_sel_{lot}_{idx}"
+            cb_key = f"mv_sel_{lot}_{drum_no}"
             checked = st.checkbox(label, key=cb_key)
             if checked:
                 selected_drums.append(drum_no)
@@ -1536,7 +1533,6 @@ def render_tab_move():
                 )
                 drum_new_qty[drum_no] = float(new_val)
 
-
     # ===== 오른쪽: 이동 위치 + 상태 + 비고 + 저장 =====
     with col_right2:
         st.markdown("### 🚚 이동 위치 선택")
@@ -1546,11 +1542,26 @@ def render_tab_move():
             from_zone = st.text_input(
                 "현재 위치",
                 value=current_zone if current_zone != "혼합" else "",
-                help="예: 4층 로타리, 외주 등",
+                help="예: 4층-A1, 외주 등",
                 key="mv_from_zone_csv",
             )
         with col2:
-            to_zone = location_picker("mv_to")
+            floor_list = ["2층", "4층", "5층", "6층", "창고", "소진", "미지정", "폐기", "외주"]
+            sel_floor = st.selectbox(
+                "이동하실 층/구역을 선택해 주세요.", floor_list, key="mv_floor_csv"
+            )
+            if sel_floor in ["창고", "소진", "미지정", "폐기", "외주"]:
+                sel_zone = ""
+            else:
+                zone_list = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
+                sel_zone = st.selectbox(
+                    "이동하실 구역을 선택해 주세요.", zone_list, key="mv_zone_csv"
+                )
+
+            if sel_floor in ["창고", "소진", "미지정", "폐기", "외주"]:
+                to_zone = sel_floor
+            else:
+                to_zone = f"{sel_floor}-{sel_zone}"
 
         if to_zone == "외주":
             move_status = "외주"
@@ -1558,7 +1569,7 @@ def render_tab_move():
         else:
             move_status = st.radio(
                 "이동 후 상태를 선택해 주세요.",
-                ["잔량", "생산대기", "생산종료"],
+                ["잔량", "생산종료"],
                 horizontal=True,
                 key="mv_status_csv",
             )
@@ -1571,12 +1582,7 @@ def render_tab_move():
                 return
 
             df_all = load_drums()
-            df_all["lot_lower"] = df_all["로트번호"].astype(str).str.lower()
-            lot_mask = df_all["lot_lower"] == lot_lower
-            
-            # 🔹 사급 벌크인 경우, 최초 입고 상태(현재위치 = '미지정')의 통에만 제품라인을 기록
-            if bulk_type == "사급" and line:
-                df_all.loc[lot_mask & (df_all["현재위치"] == "미지정"), "제품라인"] = line
+            lot_mask = df_all["로트번호"].astype(str) == lot
 
             drum_logs = []
 
@@ -1586,7 +1592,6 @@ def render_tab_move():
                     continue
                 i = idx[0]
                 old_qty = float(df_all.at[i, "통용량"])
-                old_loc = str(df_all.at[i, "현재위치"])
                 new_qty = drum_new_qty.get(dn, old_qty)
                 moved = old_qty - new_qty
 
@@ -1598,11 +1603,11 @@ def render_tab_move():
                 else:
                     df_all.at[i, "상태"] = move_status
 
-                # (통번호, 변화량, 변경 전 용량, 변경 후 용량, 변경 전 위치)
-                drum_logs.append((dn, moved, old_qty, new_qty, old_loc))
+                drum_logs.append((dn, moved, old_qty, new_qty))
 
             save_drums(df_all)
 
+            # CSV + 이동 이력 로그 저장
             write_move_log(
                 item_code=item_code,
                 item_name=item_name,
@@ -1614,19 +1619,20 @@ def render_tab_move():
 
             st.success(f"총 {len(drum_logs)}개의 통 정보가 CSV 및 이동 이력에 반영되었습니다.")
 
-    # ================== 이동 탭 내부 LOT 이동 이력 ==================
+    # 이동 탭 내부에서 현재 LOT 이동 이력 표시
     if ss.get("mv_show_move_history_here", False):
         log_df = load_move_log()
         if log_df.empty:
             st.info("이동 이력이 없습니다.")
         else:
-            sub = log_df[log_df["로트번호"].astype(str).str.lower() == lot_lower].copy()
+            sub = log_df[log_df["로트번호"].astype(str) == str(lot)].copy()
             if sub.empty:
                 st.info("해당 로트번호의 이동 이력이 없습니다.")
             else:
                 st.markdown("### 📜 해당 로트번호 이동 이력")
                 sub = sub.sort_values("시간", ascending=False).head(50)
                 st.dataframe(sub, use_container_width=True)
+
 
 # ==============================
 # 탭 2: 조회
@@ -1639,177 +1645,32 @@ def render_tab_lookup():
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
 
-    # 제조일자 기준 TAT(개월) 컬럼 추가
+    # ✅ 제조일자 기준 TAT(개월) 컬럼 추가
     df = add_tat_column(df)
 
     query = st.text_input("로트번호, 품목코드 또는 품명을 입력해 주세요.")
     if query:
         q = query.strip()
         mask = (
-            df["로트번호"].astype(str).str.contains(q, case=False, na=False)
-            | df["품목코드"].astype(str).str.contains(q, case=False, na=False)
-            | df["품명"].astype(str).str.contains(q, case=False, na=False)
+            df["로트번호"].astype(str).str.contains(q, na=False)
+            | df["품목코드"].astype(str).str.contains(q, na=False)
+            | df["품명"].astype(str).str.contains(q, na=False)
         )
         df_view = df[mask]
     else:
         df_view = df
 
-    # 용량 0 포함 여부 (기본: 미포함)
+    # 🔍 용량 0 포함 여부 (기본: 미포함)
     include_zero = st.checkbox("용량 0 포함", value=False)
 
+    # 기본(default) 상태는 0 제외
     if not include_zero:
         df_view = df_view[df_view["통용량"] > 0]
 
-    # =========================
-    # 1차: bulk CSV 에서 검색
-    # =========================
-    # 🔻 1차: CSV에서 검색 결과 없음 → production.xlsx에서 2차 검색
     if df_view.empty:
-        if not query:
-            st.warning("검색어를 입력해 주세요.")
-            return
-
-        prod_df = load_production()
-        if prod_df.empty:
-            st.info("bulk CSV와 production.xlsx 모두에서 검색 결과가 없습니다.")
-            return
-
-        q = query.strip()
-
-        # LOTNO / 품명 부분 일치 검색
-        mask_prod = (
-            prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
-            | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
-        )
-        prod_view = prod_df[mask_prod].copy()
-
-        # 🔹 제조일자(작업일자) 기준 최근 180일 이내만 남기기
-        today = datetime.today()
-        prod_view["작업일자"] = pd.to_datetime(prod_view["작업일자"], errors="coerce")
-        prod_view = prod_view[
-            (today - prod_view["작업일자"]).dt.days <= 180
-        ]
-
-        if prod_view.empty:
-            st.info("최근 6개월 이내 제조된 재고가 없습니다.")
-            return
-
-        # ===== production 기반 가상 벌크통 생성 =====
-        drums_rows = []
-
-        for _, r in prod_view.iterrows():
-            item_code = str(r["품번"])
-            item_name = str(r["품명"])
-            lot = str(r["LOTNO"]).strip().upper()
-
-            # 제조일자(작업일자)에서 날짜만 추출
-            raw_date = r["작업일자"]
-            try:
-                mfg_date = str(pd.to_datetime(raw_date).date())  # YYYY-MM-DD
-            except Exception:
-                mfg_date = str(raw_date)
-
-            prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
-
-            # 제조량 → 통번호 자동 생성
-            drums = generate_drums(prod_qty)
-
-            for d in drums:
-                drums_rows.append(
-                    {
-                        "품목코드": item_code,
-                        "품명": item_name,
-                        "로트번호": lot,
-                        "제조일자": mfg_date,
-                        "상태": "생산대기",
-                        "통번호": int(d["통번호"]),
-                        "통용량": float(d["통용량"]),
-                        "현재위치": "자사(제조실)",
-                    }
-                )
-
-        if not drums_rows:
-            st.info("production.xlsx 에 데이터는 있으나 제조량이 없어 통 생성이 불가능합니다.")
-            return
-
-        drums_df = pd.DataFrame(drums_rows)
-
-        # TAT 계산
-        drums_df = add_tat_column(drums_df)
-
-        st.markdown("#### 📄 제조실 재고 검색 결과")
-
-        show_cols = [
-            "품목코드",
-            "품명",
-            "로트번호",
-            "제조일자",
-            "상태",
-            "통번호",
-            "통용량",
-            "현재위치",
-            "TAT",
-        ]
-        show_cols = [c for c in show_cols if c in drums_df.columns]
-
-        st.data_editor(
-            drums_df[show_cols].sort_values(["로트번호", "통번호"]),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "품명": st.column_config.TextColumn(
-                    "품명",
-                    width="large",   # 🔥 이게 핵심: 품명 칸을 넓게 확장
-                )
-            },
-        )
-
-        st.caption(
-            "※ 이 벌크는 아직 이동 이력이 등록되지 않았으며 "
-            "제조작업실적현황 기반의 정보입니다."
-        )
+        st.warning("검색 결과가 없습니다.")
         return
 
-
-        # =========================
-        # 2차: production.xlsx 에서 검색
-        # =========================
-        prod_df = load_production()
-        if prod_df.empty:
-            st.warning("검색 결과가 없습니다.")
-            return
-
-        q = query.strip()
-
-        # LOTNO(M열) / 품명(K열) 기준 부분 일치 검색
-        mask_prod = (
-            prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
-            | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
-        )
-        prod_view = prod_df[mask_prod].copy()
-
-        if prod_view.empty:
-            st.info("bulk CSV와 production.xlsx 어디에서도 검색 결과가 없습니다.")
-            return
-
-        st.markdown("#### 📄 제조실 재고 검색 결과")
-
-        # 위치 컬럼 추가 (고정값: 자사(제조실))
-        prod_view = prod_view.copy()
-        prod_view["위치"] = "자사(제조실)"
-
-        # 보여줄 기본 컬럼들 (제조량 오른쪽에 위치 컬럼 배치)
-        show_cols = ["작업번호", "품번", "품명", "LOTNO", "제조량", "위치", "작업일자"]
-        show_cols = [c for c in show_cols if c in prod_view.columns]
-
-        st.dataframe(
-            prod_view[show_cols].sort_values("작업일자", ascending=False),
-            use_container_width=True,
-        )
-        st.caption("※ 이 로트는 아직 bulk_drums_extended.csv 에 등록되지 않았을 수 있습니다.")
-        return
-
-    # 🔻 여기부터는 CSV에서 검색 결과가 있는 경우 기존 로직 그대로
     st.markdown("#### 📄 행별 상세")
     st.dataframe(df_view, use_container_width=True)
 
@@ -1848,7 +1709,7 @@ def render_tab_lookup():
 
     # 층(또는 구역) 기준으로 분류용 컬럼
     tmp = df_view.copy()
-    tmp["층"] = tmp["현재위치"].astype(str).str.split(" ").str[0]
+    tmp["층"] = tmp["현재위치"].astype(str).str.split("-").str[0]
 
     # 1) 자사 위치: 2층, 4층, 5층, 6층
     df_onsite = tmp[tmp["층"].isin(["2층", "4층", "5층", "6층"])]
@@ -1870,30 +1731,14 @@ def render_tab_lookup():
 
     st.markdown("---")
     if st.button("현재 CSV를 그대로 백업 저장하기"):
-        # 🔹 한국 시간(KST) 기준 타임스탬프
-        KST = timezone(timedelta(hours=9))
-        ts = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"bulk_drums_extended_backup_{ts}.csv"
-
         df.to_csv(backup_name, index=False, encoding="utf-8-sig")
         st.success(f"백업 파일로 저장되었습니다: {backup_name}")
 
-    if st.button("간단 데이터 점검"):
-        df_all = load_drums()
-
-        prob1 = df_all[(df_all["통용량"] == 0) & ~df_all["현재위치"].isin(["소진", "폐기"])]
-        if not prob1.empty:
-            st.warning("용량 0인데 소진/폐기가 아닌 통")
-            st.dataframe(prob1, use_container_width=True)
-
-        prob2 = df_all[(df_all["현재위치"] == "외주") & (df_all["상태"] != "외주")]
-        if not prob2.empty:
-            st.warning("위치는 외주인데 상태가 외주가 아닌 통")
-            st.dataframe(prob2, use_container_width=True)
-
 
 # ==============================
-# 탭 3: 지도 (A1~C3 버튼)
+# 탭 3: 지도
 # ==============================
 def render_tab_map():
     st.markdown("### 🗺 벌크 위치 지도 (CSV 기준)")
@@ -1903,38 +1748,15 @@ def render_tab_map():
         st.info("CSV에 등록된 벌크 정보가 없습니다.")
         return
 
-    # -----------------------------
-    # (1) 현재위치 파싱: 층 / 세부구역
-    # -----------------------------
-    def parse_loc(loc) -> tuple[str, str]:
-        """
-        return: (floor, zone)
-        - "4층 로타리" -> ("4층", "로타리")
-        - "5층 미지정" -> ("5층", "미지정")
-        - "외주" -> ("외주", "")
-        - "4층" -> ("4층", "미지정")  # 보험 처리
-        """
+    def get_floor(loc: str) -> str:
         if pd.isna(loc):
-            return ("", "")
+            return ""
         s = str(loc).strip()
-        if not s:
-            return ("", "")
+        if "-" in s:
+            return s.split("-")[0]
+        return s
 
-        # 특수 상태
-        if s in ("외주", "폐기", "소진"):
-            return (s, "")
-
-        parts = s.split(" ", 1)
-        if len(parts) == 1:
-            # "4층" 같이 층만 들어온 경우
-            return (parts[0], "미지정")
-
-        floor, zone = parts[0].strip(), parts[1].strip()
-        if not zone:
-            zone = "미지정"
-        return (floor, zone)
-
-    df[["층", "세부구역"]] = df["현재위치"].apply(lambda x: pd.Series(parse_loc(x)))
+    df["층"] = df["현재위치"].apply(get_floor)
 
     floors = (
         df["층"]
@@ -1947,9 +1769,6 @@ def render_tab_map():
     )
     floors = sorted(floors)
 
-    # (기존 로직 유지) 1층 제거
-    floors = [f for f in floors if f != "1층"]
-
     if not floors:
         st.info("층 정보가 없습니다.")
         return
@@ -1961,10 +1780,8 @@ def render_tab_map():
         st.info("해당 층/구역에 등록된 벌크가 없습니다.")
         return
 
-    # -----------------------------
-    # (2) 특수 구역: 외주/폐기/소진
-    # -----------------------------
-    special_floors = {"외주", "폐기", "소진", "창고"}
+    # 소진 / 미지정 / 폐기 / 외주 / 창고 는 단일 구역으로 처리
+    special_floors = {"소진", "미지정", "폐기", "외주", "창고"}
     if sel_floor in special_floors:
         st.markdown(f"#### {sel_floor} 구역 현황")
 
@@ -1978,8 +1795,15 @@ def render_tab_map():
         st.markdown("### 🔍 상세 목록")
 
         show_cols = [
-            "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-            "상태", "현재위치", "통번호", "통용량",
+            "품목코드",
+            "품명",
+            "로트번호",
+            "제품라인",
+            "제조일자",
+            "상태",
+            "현재위치",
+            "통번호",
+            "통용량",
         ]
         st.dataframe(
             fdf[show_cols].sort_values(["로트번호", "통번호"]),
@@ -1987,34 +1811,27 @@ def render_tab_map():
         )
         return
 
-    # -----------------------------
-    # (3) 층별 세부구역 정의 (새 지도 구조)
-    # -----------------------------
-    floor_zones = {
-        "2층": ["A", "B", "C", "D", "E", "미지정"],
-        "4층": ["블리스터", "로타리", "덕용", "미지정"],
-        "5층": ["기초", "덕용", "미지정"],
-        "6층": ["스틱&파우치", "스킨팩", "미지정"],
-    }
+    def get_zone_label(loc: str) -> str:
+        if pd.isna(loc):
+            return ""
+        s = str(loc).strip()
+        if "-" in s:
+            return s.split("-")[1]
+        if s in ["2층", "4층", "5층", "6층"]:
+            return "A1"
+        return s
 
-    zones = floor_zones.get(sel_floor)
-    if not zones:
-        st.info("이 층은 아직 세부구역 정의가 없습니다. (코드의 floor_zones에 추가해 주세요.)")
-        return
+    fdf["zone_label"] = fdf["현재위치"].apply(get_zone_label)
 
-    # 세부구역이 정의에 없으면 "미지정"으로 흡수 (안전망)
-    fdf["zone_label"] = fdf["세부구역"].apply(lambda z: z if z in zones else "미지정")
+    labels_all = [f"{r}{c}" for r in ["A", "B", "C"] for c in [1, 2, 3]]
 
-    # -----------------------------
-    # (4) Zone별 집계 + 버튼 UI
-    # -----------------------------
     zone_stats = {}
     max_vol = 0.0
-    for z in zones:
-        sub = fdf[fdf["zone_label"] == z]
+    for label in labels_all:
+        sub = fdf[fdf["zone_label"] == label]
         drums = len(sub)
         vol = sub["통용량"].sum()
-        zone_stats[z] = {"drums": drums, "volume": vol}
+        zone_stats[label] = {"drums": drums, "volume": vol}
         max_vol = max(max_vol, vol)
 
     def badge(volume):
@@ -2030,66 +1847,58 @@ def render_tab_map():
         else:
             return "🟡"
 
-    st.markdown(f"#### {sel_floor} 구역별 현황 (통 개수 / 총 용량)")
+    st.markdown(f"#### {sel_floor} Zone별 현황 (통 개수 / 총 용량)")
 
-    # 버튼을 보기 좋게 N열로 배치 (2층은 3열, 나머진 2~3열)
-    ncols = 3 if sel_floor == "2층" else 3
-    rows = [zones[i:i+ncols] for i in range(0, len(zones), ncols)]
-
-    for r_idx, row_zones in enumerate(rows):
-        cols = st.columns(ncols)
-        for c_idx in range(ncols):
-            col = cols[c_idx]
-            if c_idx >= len(row_zones):
-                col.empty()
-                continue
-
-            z = row_zones[c_idx]
-            info = zone_stats.get(z, {"drums": 0, "volume": 0})
+    for row in ["A", "B", "C"]:
+        cols = st.columns(3)
+        for i, col in enumerate(cols):
+            label = f"{row}{i+1}"
+            info = zone_stats.get(label, {"drums": 0, "volume": 0})
             txt = (
-                f"{z} {badge(info['volume'])}\n"
+                f"{label} {badge(info['volume'])}\n"
                 f"{info['drums']}통 / {int(info['volume'])}kg"
             )
-            if col.button(txt, key=f"map_btn_{sel_floor}_{z}_{r_idx}_{c_idx}"):
-                st.session_state["clicked_zone_csv"] = f"{sel_floor}|{z}"
+            if col.button(txt, key=f"map_btn_{sel_floor}_{label}"):
+                st.session_state["clicked_zone_csv"] = f"{sel_floor}-{label}"
 
     st.markdown("---")
-    st.markdown("### 🔍 구역 상세 보기")
+    st.markdown("### 🔍 Zone 상세 보기")
 
     clicked = st.session_state.get("clicked_zone_csv", None)
     if not clicked:
-        st.info("확인하실 구역 버튼을 눌러 주세요.")
+        st.info("확인하실 Zone 버튼을 눌러 주세요.")
         return
 
-    cfloor, cz = clicked.split("|", 1)
-    if cfloor != sel_floor:
-        # 다른 층에서 누른 버튼이 남아있을 수 있으니 정리
-        st.session_state["clicked_zone_csv"] = None
-        st.info("확인하실 구역 버튼을 다시 눌러 주세요.")
-        return
+    st.success(f"선택된 Zone: {clicked}")
+    _, cz_label = clicked.split("-")
 
-    st.success(f"선택된 구역: {sel_floor} {cz}")
-
-    ddf = fdf[fdf["zone_label"] == cz].copy()
+    ddf = fdf[fdf["zone_label"] == cz_label].copy()
     if ddf.empty:
-        st.info("해당 구역에는 벌크가 없습니다.")
+        st.info("해당 Zone에는 벌크가 없습니다.")
         return
 
     show_cols = [
-        "품목코드", "품명", "로트번호", "제품라인", "제조일자",
-        "상태", "현재위치", "통번호", "통용량",
+        "품목코드",
+        "품명",
+        "로트번호",
+        "제품라인",
+        "제조일자",
+        "상태",
+        "현재위치",
+        "통번호",
+        "통용량",
     ]
     st.dataframe(
         ddf[show_cols].sort_values(["로트번호", "통번호"]),
         use_container_width=True,
     )
 
+
 # ==============================
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
-
 def render_tab_move_log():
-    st.markdown("### 📜 이동 이력 (롤백 전용 / 삭제만 가능)")
+    st.markdown("### 📜 이동 이력 (수정 / 삭제 가능)")
 
     df = load_move_log()
     if df.empty:
@@ -2099,15 +1908,11 @@ def render_tab_move_log():
     ss = st.session_state
     ss.setdefault("log_lot_filter", "")
     ss.setdefault("log_page", 1)
-    ss.setdefault("log_mobile_view", False)
 
-    SLIDER_KEY = "log_page_slider_widget"  # ✅ 위젯 전용 key (세션 값과 분리!)
-
+    # ▶ 검색 초기화 콜백
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_page"] = 1
-        ss["log_mobile_view"] = False
-        ss.pop(SLIDER_KEY, None)  # ✅ 슬라이더 위젯 상태만 제거
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -2119,15 +1924,10 @@ def render_tab_move_log():
     with col2:
         st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # =========================
     # 필터 적용
-    # =========================
     if lot_filter:
-        q = lot_filter.strip().lower()
-        df_tmp = df.copy()
-        df_tmp["lot_lower"] = df_tmp["로트번호"].astype(str).str.lower()
-        df_view = df_tmp[df_tmp["lot_lower"].str.contains(q, na=False)].copy()
-        df_view = df_view.drop(columns=["lot_lower"], errors="ignore")
+        mask = df["로트번호"].astype(str).str.contains(lot_filter.strip(), na=False)
+        df_view = df[mask].copy()
     else:
         df_view = df.copy()
 
@@ -2135,115 +1935,31 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
-    # 최신순
+    # 시간 내림차순 정렬
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # =========================
-    # 페이지네이션 (안전한 slider 구조)
-    # =========================
+    # --- 페이지네이션 ---
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    page = st.slider(
-        "페이지 선택",
-        min_value=1,
-        max_value=total_pages,
-        value=1,
-        step=1,
-    )
+    ss["log_page"] = min(max(1, ss.get("log_page", 1)), total_pages)
 
-    start = (page - 1) * page_size
+    colp1, colp2, colp3 = st.columns([1, 2, 1])
+    with colp1:
+        if st.button("◀ 이전", key="log_prev") and ss["log_page"] > 1:
+            ss["log_page"] -= 1
+    with colp2:
+        st.write(f"페이지 {ss['log_page']} / {total_pages} (총 {total_rows}건)")
+    with colp3:
+        if st.button("다음 ▶", key="log_next") and ss["log_page"] < total_pages:
+            ss["log_page"] += 1
+
+    start = (ss["log_page"] - 1) * page_size
     end = start + page_size
-
-    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
 
-    st.markdown(
-        f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
-        f"페이지 {page} / {total_pages} (총 {total_rows}건)"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-
-    # =========================
-    # 📱 모바일 공유용 보기 (토글 ON이면 기본 화면 대신 요약만)
-    # =========================
-    colm1, colm2 = st.columns([1, 2])
-    with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss["log_mobile_view"])
-    with colm2:
-        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
-
-    if ss["log_mobile_view"]:
-        st.markdown("#### 📱 모바일 공유용 요약")
-
-        mobile_cols = [
-            "시간",
-            "ID",
-            "품명",
-            "로트번호",
-            "통번호",
-            "변경 전 용량",
-            "변경 후 용량",
-            "변화량",
-            "변경 전 위치",
-            "변경 후 위치",
-        ]
-        mobile_cols = [c for c in mobile_cols if c in page_df.columns]
-        mdf = page_df[mobile_cols].copy()
-
-        # ✅ nan → 공백
-        mdf = mdf.where(pd.notna(mdf), "")
-
-        # 숫자 깔끔하게
-        for c in ["변경 전 용량", "변경 후 용량", "변화량"]:
-            if c in mdf.columns:
-                mdf[c] = pd.to_numeric(mdf[c], errors="coerce")
-                mdf[c] = mdf[c].apply(lambda x: "" if pd.isna(x) else float(x))
-
-        def _fmt_num(v):
-            if v == "" or v is None:
-                return ""
-            try:
-                v = float(v)
-                if v.is_integer():
-                    return str(int(v))
-                return f"{v:.1f}"
-            except Exception:
-                return str(v)
-
-        for _, r in mdf.iterrows():
-            lot = str(r.get("로트번호", "")).strip()
-            drum = str(r.get("통번호", "")).strip()
-            name = str(r.get("품명", "")).strip()
-
-            t = str(r.get("시간", "")).strip()
-            uid = str(r.get("ID", "")).strip()
-
-            oldq = _fmt_num(r.get("변경 전 용량", ""))
-            newq = _fmt_num(r.get("변경 후 용량", ""))
-            delta = _fmt_num(r.get("변화량", ""))
-
-            oldloc = str(r.get("변경 전 위치", "")).strip()
-            newloc = str(r.get("변경 후 위치", "")).strip()
-
-            st.markdown(
-                f"""
-**{lot} / {drum}번 통 / {name}**  
-- 시간: {t} / 작성자: {uid}  
-- 용량: {oldq} → {newq} kg (변화량: {delta})  
-- 위치: {oldloc} → {newloc}
-                """.strip()
-            )
-            st.divider()
-
-        return
-
-    # =========================
-    # 🖥 PC 기본 화면 (표 + 롤백 삭제)
-    # =========================
+    # 표시/편집할 컬럼 + 삭제 체크박스 컬럼 추가
     cols_order = [
         "시간",
         "ID",
@@ -2257,30 +1973,28 @@ def render_tab_move_log():
         "변경 전 위치",
         "변경 후 위치",
     ]
-    cols_order = [c for c in cols_order if c in page_df.columns]
-    page_df = page_df[cols_order].copy()
+    page_df = page_df[cols_order]
 
     delete_col = "삭제"
-    page_df[delete_col] = False
+    if delete_col not in page_df.columns:
+        page_df[delete_col] = False
 
     st.caption(
-        "※ LOG는 수정할 수 없습니다. "
-        "조회만 가능하며, '삭제'에 체크 후 '선택 행 삭제(롤백)'을 누르면 "
-        "해당 이동 이력은 삭제되고, 통 정보 CSV는 변경 전 상태로 롤백됩니다.\n"
-        "※ 안전을 위해 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다."
+        "※ '시간'과 'ID'는 수정할 수 없습니다. "
+        "나머지 칼럼은 수정 가능하며, '삭제' 체크 후 '선택 행 삭제'를 누르면 해당 행이 삭제됩니다."
     )
 
     edited_page = st.data_editor(
         page_df,
         use_container_width=True,
-        disabled=cols_order,
-        hide_index=True,
+        disabled=["시간", "ID"],   # 이 두 컬럼은 수정 불가
         column_config={
-            delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
+            delete_col: st.column_config.CheckboxColumn("삭제", help="삭제할 행에 체크"),
         },
         key=f"move_log_editor_page_{ss['log_page']}",
     )
 
+    # 공통 저장 함수
     def _save_full_log(df_updated: pd.DataFrame):
         buf = io.BytesIO()
         df_updated.to_csv(buf, index=False, encoding="utf-8-sig")
@@ -2291,87 +2005,50 @@ def render_tab_move_log():
             df_updated.to_csv(MOVE_LOG_CSV, index=False, encoding="utf-8-sig")
         except Exception:
             pass
+        # S3에도 저장
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
-    _, col_delete = st.columns([3, 1])
-    with col_delete:
-        if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
-            if delete_col not in edited_page.columns:
-                st.warning("삭제 컬럼이 없습니다.")
-                return
+    col_save, col_delete = st.columns(2)
 
-            selected_idx = edited_page.index[edited_page[delete_col] == True].tolist()
-            if not selected_idx:
-                st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
-                return
+    # ✅ 내용 수정 저장
+    with col_save:
+        if st.button("변경 내용 저장", key="log_save_changes"):
+            try:
+                df_updated = df.copy()
 
-            rows_to_delete = df.loc[selected_idx].copy()
-
-            # 2) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
-            log_all = df.copy()
-            log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
-
-            not_latest = []
-            for idx, row in rows_to_delete.iterrows():
-                lot = str(row.get("로트번호", ""))
-                drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
-
-                mask = (log_all["로트번호"].astype(str) == lot) & (log_all["통번호"] == drum_no)
-                sub = log_all[mask]
-                if sub.empty:
-                    continue
-
-                sub_valid = sub.dropna(subset=["__dt"])
-                if not sub_valid.empty:
-                    last_idx = sub_valid["__dt"].idxmax()
+                if delete_col in edited_page.columns:
+                    edited_for_update = edited_page.drop(columns=[delete_col])
                 else:
-                    last_idx = sub.index.max()
+                    edited_for_update = edited_page
 
-                if idx != last_idx:
-                    not_latest.append(f"{lot} / 통 {drum_no}")
+                df_updated.update(edited_for_update)
+                _save_full_log(df_updated)
+                st.success("이동 이력 변경 내용이 저장되었습니다.")
+            except Exception as e:
+                st.error(f"변경 내용을 저장하는 중 오류가 발생했습니다: {e}")
 
-            if not_latest:
-                st.error(
-                    "롤백은 각 통의 '가장 최근 이동 이력'만 삭제할 수 있습니다.\n"
-                    "다음 항목은 더 새로운 이력이 있어 롤백할 수 없습니다:\n"
-                    + ", ".join(not_latest)
-                )
-                return
+    # 🗑 선택 행 삭제
+    with col_delete:
+        if st.button("선택 행 삭제", key="log_delete_rows"):
+            try:
+                if delete_col in edited_page.columns:
+                    to_del_idx = edited_page[edited_page[delete_col] == True].index
+                else:
+                    to_del_idx = []
 
-            # 3) 통 정보 CSV 롤백 (통용량/현재위치만)
-            drums_df = load_drums()
-            drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
+                if len(to_del_idx) == 0:
+                    st.warning("삭제할 행을 먼저 '삭제' 칼럼에 체크해 주세요.")
+                else:
+                    df_updated = df.drop(index=to_del_idx)
+                    _save_full_log(df_updated)
+                    st.success(f"총 {len(to_del_idx)}개 행이 삭제되었습니다.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"행을 삭제하는 중 오류가 발생했습니다: {e}")
 
-            for _, row in rows_to_delete.iterrows():
-                lot = str(row.get("로트번호", ""))
-                lot_lower = lot.lower()
-                drum_no = int(pd.to_numeric(row.get("통번호", 0), errors="coerce") or 0)
-
-                old_qty = float(pd.to_numeric(row.get("변경 전 용량", 0), errors="coerce") or 0)
-                from_loc = str(row.get("변경 전 위치", "") or "").strip()
-
-                mask_drum = (drums_df["lot_lower"] == lot_lower) & (drums_df["통번호"] == drum_no)
-                drum_idxs = drums_df.index[mask_drum]
-                if len(drum_idxs) == 0:
-                    continue
-
-                i = drum_idxs[0]
-                drums_df.at[i, "통용량"] = old_qty
-                if from_loc:
-                    drums_df.at[i, "현재위치"] = from_loc
-
-            drums_df = drums_df.drop(columns=["lot_lower"], errors="ignore")
-            save_drums(drums_df)
-
-            # 4) 이동 로그에서 행 삭제 + 저장
-            df_updated = df.drop(index=selected_idx)
-            _save_full_log(df_updated)
-
-            st.success(f"총 {len(selected_idx)}개 이동 이력이 삭제되고, 관련 통 정보가 롤백되었습니다.")
-            st.rerun()
 
 # ==============================
-# 탭 5: 데이터 파일 관리
+# 탭 5: 데이터 파일 관리 (메인 탭 중 데이터 탭)
 # ==============================
 def file_status(sess_key: str, path: str) -> str:
     ss = st.session_state
@@ -2398,6 +2075,7 @@ def render_tab_data():
             type=["csv"],
             key="data_up_bulk",
         )
+        # 🔽 실제 파일 수정 시간 기준 캡션
         st.caption(last_upload_caption(CSV_PATH))
 
         if st.button("이 파일로 bulk CSV 교체", key="apply_bulk"):
@@ -2412,6 +2090,7 @@ def render_tab_data():
                     df_tmp.to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
                 except Exception:
                     pass
+                # 🔹 S3 업로드
                 s3_upload_bytes(CSV_PATH, data)
                 st.success("bulk_drums_extended.csv가 교체되었습니다.")
 
@@ -2534,6 +2213,7 @@ def has_data(sess_key: str, path: str) -> bool:
         return True
     if os.path.exists(path):
         return True
+    # 마지막으로 S3 확인
     b = s3_download_bytes(path)
     if b is not None:
         return True
@@ -2556,11 +2236,13 @@ def main():
         and has_data("stock_xlsx_bytes", STOCK_FILE)
     )
 
+    # data_initialized 플래그가 없고, 필수 파일도 없으면 최초 업로드 화면
     if not ss.get("data_initialized", False) and not files_ready:
+        # 🔹 간이 업로드 말고, 우리가 만든 정식 업로드 화면 호출
         render_file_loader()
         return
 
-    # 3) 사이드바
+    # 3) 사이드바: 사용자 정보 + 로그아웃 + (선택) CSV 다운로드 버튼
     with st.sidebar:
         st.markdown(f"**사용자:** {ss['user_name']} ({ss['user_id']})")
         if st.button("로그아웃", key="logout_btn"):
@@ -2569,6 +2251,7 @@ def main():
                     del st.session_state[k]
             st.rerun()
 
+        # 현재 세션의 bulk/move_log를 다운로드할 수 있게
         if "bulk_csv_bytes" in ss:
             st.download_button(
                 "현재 bulk CSV 다운로드",
