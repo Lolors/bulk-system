@@ -2102,7 +2102,7 @@ def render_tab_move_log():
     ss = st.session_state
 
     # ------------------------------
-    # Key 상수 (중복 방지)
+    # 키 정의 (중복 방지)
     # ------------------------------
     KEY_FILTER = "log_lot_filter"
     KEY_FILTER_PREV = "log_lot_filter_prev"
@@ -2114,30 +2114,25 @@ def render_tab_move_log():
     ss.setdefault(KEY_PAGE, 1)
     ss.setdefault(KEY_MOBILE, False)
 
-    # ------------------------------
-    # 검색 + 페이지 UI (한 줄)
-    # ------------------------------
-    page_size = 50
-
-    col1, col2, col_prev, col_page, col_next, col_info = st.columns([3.2, 1.2, 1.0, 1.8, 1.0, 2.2])
-
-    with col1:
-        lot_filter = st.text_input(
-            "로트번호로 검색 (부분 일치)",
-            key=KEY_FILTER,
-            placeholder="예: 2E075K",
-            label_visibility="collapsed",
-        )
-
-    with col2:
-        reset_clicked = st.button("검색 초기화", key="log_reset_btn", use_container_width=True)
-
-    if reset_clicked:
+    def reset_log_filter():
         ss[KEY_FILTER] = ""
         ss[KEY_FILTER_PREV] = ""
         ss[KEY_PAGE] = 1
         ss[KEY_MOBILE] = False
         st.rerun()
+
+    # ------------------------------
+    # 검색 UI (한 줄)
+    # ------------------------------
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        lot_filter = st.text_input(
+            "로트번호로 검색 (부분 일치)",
+            key=KEY_FILTER,
+            placeholder="예: 2E075K",
+        )
+    with col2:
+        st.button("검색 초기화", key="log_reset_btn", on_click=reset_log_filter)
 
     # ✅ 검색어 변경 감지 → 페이지 1로 리셋
     cur_filter = (lot_filter or "").strip().lower()
@@ -2163,57 +2158,29 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
+    # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
+    # ------------------------------
+    # 페이지 계산 + slice (UI는 아래에서)
+    # ------------------------------
+    page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    # 페이지 범위 보정
     try:
         ss[KEY_PAGE] = int(ss.get(KEY_PAGE, 1))
     except Exception:
         ss[KEY_PAGE] = 1
     ss[KEY_PAGE] = min(max(1, ss[KEY_PAGE]), total_pages)
 
-    page_options = list(range(1, total_pages + 1))
+    page = int(ss[KEY_PAGE])
 
-    # ✅ 이전/다음 버튼
-    with col_prev:
-        prev_clicked = st.button("이전", key="log_page_prev_btn", use_container_width=True)
-    with col_next:
-        next_clicked = st.button("다음", key="log_page_next_btn", use_container_width=True)
-
-    if prev_clicked:
-        ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
-        st.rerun()
-
-    if next_clicked:
-        ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
-        st.rerun()
-
-    # ✅ 페이지 선택 박스 (가운데)
-    with col_page:
-        page = st.selectbox(
-            "페이지 선택",
-            options=page_options,
-            index=page_options.index(int(ss[KEY_PAGE])),
-            key=KEY_PAGE,
-            label_visibility="collapsed",
-        )
-
-    with col_info:
-        st.markdown(
-            f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
-            f"총 {total_rows}건 · {total_pages}페이지</div>",
-            unsafe_allow_html=True,
-        )
-
-    start = (int(page) - 1) * page_size
+    start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지 (롤백 정확도)
+    # ✅ 원본 인덱스 유지
     page_df = df_view.iloc[start:end].copy()
-
 
     # ------------------------------
     # 📱 모바일 공유용 보기 (토글)
@@ -2265,27 +2232,12 @@ def render_tab_move_log():
         return
 
     # ------------------------------
-    # PC 기본 화면
+    # PC 기본 화면: 표 (삭제 체크 포함)
     # ------------------------------
-    st.markdown(
-        f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
-        f"페이지 {page} / {total_pages} (총 {total_rows}건)"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
     cols_order = [
-        "시간",
-        "ID",
-        "품번",
-        "품명",
-        "로트번호",
-        "통번호",
-        "변경 전 용량",
-        "변경 후 용량",
-        "변화량",
-        "변경 전 위치",
-        "변경 후 위치",
+        "시간", "ID", "품번", "품명", "로트번호", "통번호",
+        "변경 전 용량", "변경 후 용량", "변화량",
+        "변경 전 위치", "변경 후 위치",
     ]
     cols_order = [c for c in cols_order if c in page_df.columns]
     page_edit = page_df[cols_order].copy()
@@ -2323,9 +2275,43 @@ def render_tab_move_log():
             pass
         s3_upload_bytes(MOVE_LOG_CSV, data)
 
-    _, col_delete = st.columns([3, 1])
+    # ------------------------------
+    # ✅ 페이지네이션 + 삭제 버튼 (같은 줄)
+    # ------------------------------
+    col_prev, col_page, col_next, col_info, col_delete = st.columns([1.1, 1.8, 1.1, 2.5, 2.0])
+
+    with col_prev:
+        if st.button("⬅️ 이전", key="log_page_prev_btn", use_container_width=True):
+            ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
+            st.rerun()
+
+    with col_page:
+        page_options = list(range(1, total_pages + 1))
+        new_page = st.selectbox(
+            "페이지 선택",
+            options=page_options,
+            index=page_options.index(int(ss[KEY_PAGE])),
+            key="log_page_selectbox_bottom",
+            label_visibility="collapsed",
+        )
+        if int(new_page) != int(ss[KEY_PAGE]):
+            ss[KEY_PAGE] = int(new_page)
+            st.rerun()
+
+    with col_next:
+        if st.button("다음 ➡️", key="log_page_next_btn", use_container_width=True):
+            ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
+            st.rerun()
+
+    with col_info:
+        st.markdown(
+            f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
+            f"페이지 {page} / {total_pages} · 총 {total_rows}건</div>",
+            unsafe_allow_html=True,
+        )
+
     with col_delete:
-        if st.button("선택 행 삭제 (롤백)", key="log_delete_rows"):
+        if st.button("선택 행 삭제 (롤백)", key="log_delete_rows", use_container_width=True):
             if delete_col not in edited_page.columns:
                 st.warning("삭제 컬럼이 없습니다.")
                 return
@@ -2335,8 +2321,10 @@ def render_tab_move_log():
                 st.warning("먼저 롤백할 행을 '삭제' 칼럼에 체크해 주세요.")
                 return
 
+            # 원본(df) 기준으로 해당 행 데이터 확보 (page_df의 인덱스는 df_view/df의 원본 인덱스)
             rows_to_delete = df.loc[selected_idx].copy()
 
+            # 2) 각 통(로트번호+통번호)의 '가장 최신 이력'인지 확인
             log_all = df.copy()
             log_all["__dt"] = pd.to_datetime(log_all["시간"], errors="coerce")
 
@@ -2367,6 +2355,7 @@ def render_tab_move_log():
                 )
                 return
 
+            # 3) 통 정보 CSV 롤백 (통용량/현재위치만)
             drums_df = load_drums()
             drums_df["lot_lower"] = drums_df["로트번호"].astype(str).str.lower()
 
@@ -2391,6 +2380,7 @@ def render_tab_move_log():
             drums_df = drums_df.drop(columns=["lot_lower"], errors="ignore")
             save_drums(drums_df)
 
+            # 4) 이동 로그에서 행 삭제 + 저장
             df_updated = df.drop(index=selected_idx)
             _save_full_log(df_updated)
 
