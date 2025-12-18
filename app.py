@@ -2196,12 +2196,7 @@ def render_tab_move_log():
         )
 
     with colp4:
-        st.markdown(
-            f"<div style='padding-top:28px; font-size:0.9rem;'>"
-            f"총 {total_rows}건 · {total_pages}페이지</div>",
-            unsafe_allow_html=True,
-        )
-
+    
     # 버튼/입력 반영 (st.rerun() 없이 현재 런에서 바로 페이지 갱신)
     if prev_clicked:
         ss["log_page"] = _clamp_page(int(ss["log_page"]) - 1, total_pages)
