@@ -2087,7 +2087,7 @@ def render_tab_map():
         use_container_width=True,
     )
 
-## ==============================
+# ==============================
 # 탭 4: 이동 이력 (수정 + 행 삭제 가능)
 # ==============================
 
@@ -2100,42 +2100,55 @@ def render_tab_move_log():
         return
 
     ss = st.session_state
-    ss.setdefault("log_lot_filter", "")
-    ss.setdefault("log_lot_filter_prev", "")
-    ss.setdefault("log_mobile_view", False)
-
-    SLIDER_KEY = "log_page_slider_v2"
-
-    def reset_log_filter():
-        ss["log_lot_filter"] = ""
-        ss["log_lot_filter_prev"] = ""
-        ss.pop(SLIDER_KEY, None)
-        ss.pop("log_mobile_view", None)
-        st.rerun()
 
     # ------------------------------
-    # 검색 UI
+    # Key 상수 (중복 방지)
     # ------------------------------
-    col1, col2 = st.columns([3, 1])
+    KEY_FILTER = "log_lot_filter"
+    KEY_FILTER_PREV = "log_lot_filter_prev"
+    KEY_PAGE = "log_page_select_v1"
+    KEY_MOBILE = "log_mobile_view"
+
+    ss.setdefault(KEY_FILTER, "")
+    ss.setdefault(KEY_FILTER_PREV, "")
+    ss.setdefault(KEY_PAGE, 1)
+    ss.setdefault(KEY_MOBILE, False)
+
+    # ------------------------------
+    # 검색 + 페이지 UI (한 줄)
+    # ------------------------------
+    page_size = 50
+
+    col1, col2, col3, col4 = st.columns([3.2, 1.2, 1.8, 2.0])
+
     with col1:
         lot_filter = st.text_input(
             "로트번호로 검색 (부분 일치)",
-            key="log_lot_filter",
+            key=KEY_FILTER,
             placeholder="예: 2E075K",
+            label_visibility="collapsed",
         )
-    with col2:
-        st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
-    # ✅ 검색어 변경 감지 → 페이지 슬라이더 상태 리셋 (가장 중요)
-    cur_filter = (lot_filter or "").strip().lower()
-    prev_filter = (ss.get("log_lot_filter_prev") or "").strip().lower()
-    if cur_filter != prev_filter:
-        ss["log_lot_filter_prev"] = cur_filter
-        ss.pop(SLIDER_KEY, None)
+    with col2:
+        reset_clicked = st.button("검색 초기화", key="log_reset_btn", use_container_width=True)
 
     # ------------------------------
     # 필터 적용
     # ------------------------------
+    if reset_clicked:
+        ss[KEY_FILTER] = ""
+        ss[KEY_FILTER_PREV] = ""
+        ss[KEY_PAGE] = 1
+        ss[KEY_MOBILE] = False
+        st.rerun()
+
+    # ✅ 검색어 변경 감지 → 페이지 1로 리셋
+    cur_filter = (lot_filter or "").strip().lower()
+    prev_filter = (ss.get(KEY_FILTER_PREV) or "").strip().lower()
+    if cur_filter != prev_filter:
+        ss[KEY_FILTER_PREV] = cur_filter
+        ss[KEY_PAGE] = 1
+
     if lot_filter:
         q = lot_filter.strip().lower()
         df_tmp = df.copy()
@@ -2152,49 +2165,50 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # =========================
-     # =========================
-    # 페이지네이션 (selectbox 방식: 검색해도 절대 안 터짐)
-    # =========================
-    page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    PAGE_KEY = "log_page_select_v1"
-
-    # 이전 선택값(있으면) 복구 + 범위 보정
-    prev_page = ss.get(PAGE_KEY, 1)
+    # 페이지 범위 보정
     try:
-        prev_page = int(prev_page)
+        ss[KEY_PAGE] = int(ss.get(KEY_PAGE, 1))
     except Exception:
-        prev_page = 1
-    prev_page = min(max(1, prev_page), total_pages)
+        ss[KEY_PAGE] = 1
+    ss[KEY_PAGE] = min(max(1, ss[KEY_PAGE]), total_pages)
 
     page_options = list(range(1, total_pages + 1))
 
-    page = st.selectbox(
-        "페이지 선택",
-        options=page_options,
-        index=page_options.index(prev_page),
-        key=PAGE_KEY,
-    )
+    with col3:
+        page = st.selectbox(
+            "페이지 선택",
+            options=page_options,
+            index=page_options.index(ss[KEY_PAGE]),
+            key=KEY_PAGE,
+            label_visibility="collapsed",
+        )
+
+    with col4:
+        st.markdown(
+            f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
+            f"총 {total_rows}건 · {total_pages}페이지</div>",
+            unsafe_allow_html=True,
+        )
 
     start = (page - 1) * page_size
     end = start + page_size
 
-    # ✅ 원본 인덱스 유지
+    # ✅ 원본 인덱스 유지 (롤백 정확도)
     page_df = df_view.iloc[start:end].copy()
 
-    # =========================
+    # ------------------------------
     # 📱 모바일 공유용 보기 (토글)
-    # =========================
+    # ------------------------------
     colm1, colm2 = st.columns([1, 2])
     with colm1:
-        ss["log_mobile_view"] = st.toggle("📱 모바일 공유용 보기", value=ss.get("log_mobile_view", False))
+        ss[KEY_MOBILE] = st.toggle("📱 모바일 공유용 보기", value=ss.get(KEY_MOBILE, False))
     with colm2:
         st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
 
-    if ss["log_mobile_view"]:
+    if ss[KEY_MOBILE]:
         st.markdown("#### 📱 모바일 공유용 요약")
 
         mobile_cols = [
@@ -2234,9 +2248,9 @@ def render_tab_move_log():
 
         return
 
-    # =========================
+    # ------------------------------
     # PC 기본 화면
-    # =========================
+    # ------------------------------
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
         f"페이지 {page} / {total_pages} (총 {total_rows}건)"
