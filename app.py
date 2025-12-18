@@ -2109,9 +2109,9 @@ def render_tab_move_log():
     def reset_log_filter():
         ss["log_lot_filter"] = ""
         ss["log_lot_filter_prev"] = ""
-        ss.pop("log_page_select_v1", None)   # ✅ selectbox 페이지 키만 리셋
+        ss.pop(SLIDER_KEY, None)
         ss.pop("log_mobile_view", None)
-        # st.rerun()는 콜백에서 no-op 경고가 날 수 있으니 삭제 권장
+        st.rerun()
 
     # ------------------------------
     # 검색 UI
@@ -2152,87 +2152,32 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-    # ------------------------------
-    # 검색 + 페이지 UI (한 줄)
-    # ------------------------------
+    # =========================
+     # =========================
+    # 페이지네이션 (selectbox 방식: 검색해도 절대 안 터짐)
+    # =========================
     page_size = 50
-
-    # ✅ 1) 먼저 "전체 df" 기준으로 total_pages를 계산 (초기 표시용)
-    total_pages_base = max(1, math.ceil(len(df) / page_size))
-
-    # 한 줄 배치: 검색칸 / 초기화 / 페이지선택 / 총건수
-    col1, col2, col3, col4 = st.columns([3.2, 1.2, 1.6, 2.0])
-
-    with col1:
-        lot_filter = st.text_input(
-            "로트번호로 검색 (부분 일치)",
-            key="log_lot_filter",
-            placeholder="예: 2E075K",
-            label_visibility="collapsed",
-        )
-
-    with col2:
-        st.button("검색 초기화", key="log_reset", on_click=reset_log_filter, use_container_width=True)
-
-    # ✅ 검색어 변경 감지 → 페이지 값 리셋(가장 중요)
-    cur_filter = (lot_filter or "").strip().lower()
-    prev_filter = (ss.get("log_lot_filter_prev") or "").strip().lower()
-    if cur_filter != prev_filter:
-        ss["log_lot_filter_prev"] = cur_filter
-        ss[PAGE_KEY] = 1  # 페이지를 1로 리셋
-
-    # ------------------------------
-    # 필터 적용
-    # ------------------------------
-    if lot_filter:
-        q = lot_filter.strip().lower()
-        df_tmp = df.copy()
-        df_tmp["lot_lower"] = df_tmp["로트번호"].astype(str).str.lower()
-        df_view = df_tmp[df_tmp["lot_lower"].str.contains(q, na=False)].copy()
-        df_view = df_view.drop(columns=["lot_lower"], errors="ignore")
-    else:
-        df_view = df.copy()
-
-    if df_view.empty:
-        st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
-        return
-
-    # 최신순
-    df_view = df_view.sort_values("시간", ascending=False)
-
-    # ------------------------------
-    # 페이지네이션 (selectbox)
-    # ------------------------------
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
     PAGE_KEY = "log_page_select_v1"
-    ss.setdefault(PAGE_KEY, 1)
 
-    # 범위 보정
+    # 이전 선택값(있으면) 복구 + 범위 보정
+    prev_page = ss.get(PAGE_KEY, 1)
     try:
-        ss[PAGE_KEY] = int(ss.get(PAGE_KEY, 1))
+        prev_page = int(prev_page)
     except Exception:
-        ss[PAGE_KEY] = 1
-    ss[PAGE_KEY] = min(max(1, ss[PAGE_KEY]), total_pages)
+        prev_page = 1
+    prev_page = min(max(1, prev_page), total_pages)
 
     page_options = list(range(1, total_pages + 1))
 
-    with col3:
-        page = st.selectbox(
-            "페이지 선택",
-            options=page_options,
-            index=page_options.index(ss[PAGE_KEY]),
-            key=PAGE_KEY,
-            label_visibility="collapsed",
-        )
-
-    with col4:
-        st.markdown(
-            f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
-            f"총 {total_rows}건 · {total_pages}페이지</div>",
-            unsafe_allow_html=True,
-        )
+    page = st.selectbox(
+        "페이지 선택",
+        options=page_options,
+        index=page_options.index(prev_page),
+        key=PAGE_KEY,
+    )
 
     start = (page - 1) * page_size
     end = start + page_size
