@@ -2121,12 +2121,7 @@ def render_tab_move_log():
             placeholder="예: 2E075K",
         )
     with col2:
-        if st.button("검색 초기화", key="log_reset"):
-            ss["log_lot_filter"] = ""
-            ss["log_page"] = 1
-            ss["log_last_filter"] = ""
-            ss["log_mobile_view"] = False
-            st.rerun()
+        st.button("검색 초기화", key="log_reset", on_click=reset_log_filter)
 
     # ✅ 검색어 변경 감지 → 페이지 슬라이더 상태 리셋 (가장 중요)
     cur_filter = (lot_filter or "").strip().lower()
@@ -2154,65 +2149,32 @@ def render_tab_move_log():
     # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
-
     # =========================
-    # 페이지네이션 (이전/다음 + 페이지 입력)
+     # =========================
+    # 페이지네이션 (selectbox 방식: 검색해도 절대 안 터짐)
     # =========================
-    def _clamp_page(p: int, total: int) -> int:
-        try:
-            p = int(p)
-        except Exception:
-            p = 1
-        if total < 1:
-            return 1
-        return max(1, min(p, total))
-
     page_size = 50
     total_rows = len(df_view)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
-    ss.setdefault("log_page", 1)
-    ss.setdefault("log_mobile_view", False)
+    PAGE_KEY = "log_page_select_v1"
 
-    ss["log_page"] = _clamp_page(ss.get("log_page", 1), total_pages)
+    # 이전 선택값(있으면) 복구 + 범위 보정
+    prev_page = ss.get(PAGE_KEY, 1)
+    try:
+        prev_page = int(prev_page)
+    except Exception:
+        prev_page = 1
+    prev_page = min(max(1, prev_page), total_pages)
 
-    # --- 페이지 이동 UI ---
-    colp1, colp2, colp3, colp4 = st.columns([1.2, 1.2, 2.0, 4.0])
+    page_options = list(range(1, total_pages + 1))
 
-    with colp1:
-        prev_clicked = st.button("⬅️ 이전", key="log_page_prev", use_container_width=True)
-
-    with colp2:
-        next_clicked = st.button("다음 ➡️", key="log_page_next", use_container_width=True)
-
-    with colp3:
-        page_input = st.number_input(
-            "페이지",
-            min_value=1,
-            max_value=total_pages,
-            value=int(ss["log_page"]),
-            step=1,
-            key="log_page_input",
-        )
-
-    with colp4:
-        st.markdown(
-            f"<div style='padding-top:28px; font-size:0.9rem;'>"
-            f"총 {total_rows}건 · {total_pages}페이지</div>",
-            unsafe_allow_html=True,
-        )
-
-    # 버튼/입력 반영 (st.rerun() 없이 현재 런에서 바로 페이지 갱신)
-    if prev_clicked:
-        ss["log_page"] = _clamp_page(int(ss["log_page"]) - 1, total_pages)
-
-    if next_clicked:
-        ss["log_page"] = _clamp_page(int(ss["log_page"]) + 1, total_pages)
-
-    if int(page_input) != int(ss["log_page"]):
-        ss["log_page"] = _clamp_page(int(page_input), total_pages)
-
-    page = int(ss["log_page"])
+    page = st.selectbox(
+        "페이지 선택",
+        options=page_options,
+        index=page_options.index(prev_page),
+        key=PAGE_KEY,
+    )
 
     start = (page - 1) * page_size
     end = start + page_size
@@ -2270,7 +2232,7 @@ def render_tab_move_log():
         return
 
     # =========================
-    # PC 기본 화면: 페이지 표시 (✅ 한 번만)
+    # PC 기본 화면
     # =========================
     st.markdown(
         f"<div style='text-align:center; font-size:0.9rem; margin-top:-10px;'>"
@@ -2313,7 +2275,7 @@ def render_tab_move_log():
         column_config={
             delete_col: st.column_config.CheckboxColumn("삭제", help="롤백할 행에 체크"),
         },
-        key=f"move_log_editor_page_{int(ss['log_page'])}",
+        key=f"move_log_editor_page_{page}",
     )
 
     def _save_full_log(df_updated: pd.DataFrame):
