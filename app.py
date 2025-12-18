@@ -2185,11 +2185,7 @@ def render_tab_move_log():
     # ------------------------------
     # 📱 모바일 공유용 보기 (토글)
     # ------------------------------
-    colm1, colm2 = st.columns([1, 2])
-    with colm1:
-        ss[KEY_MOBILE] = st.toggle("📱 모바일 공유용 보기", value=ss.get(KEY_MOBILE, False))
-    with colm2:
-        st.caption("모바일에서 잘리지 않도록 컬럼을 줄이고 카드형으로 표시합니다.")
+    ss[KEY_MOBILE] = st.toggle("📱 모바일 공유용 보기", value=ss.get(KEY_MOBILE, False))
 
     if ss[KEY_MOBILE]:
         st.markdown("#### 📱 모바일 공유용 요약")
