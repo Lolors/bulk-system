@@ -2119,7 +2119,7 @@ def render_tab_move_log():
     # ------------------------------
     page_size = 50
 
-    col1, col2, col3, col4 = st.columns([3.2, 1.2, 1.8, 2.0])
+    col1, col2, col_prev, col_page, col_next, col_info = st.columns([3.2, 1.2, 1.0, 1.8, 1.0, 2.2])
 
     with col1:
         lot_filter = st.text_input(
@@ -2132,9 +2132,6 @@ def render_tab_move_log():
     with col2:
         reset_clicked = st.button("검색 초기화", key="log_reset_btn", use_container_width=True)
 
-    # ------------------------------
-    # 필터 적용
-    # ------------------------------
     if reset_clicked:
         ss[KEY_FILTER] = ""
         ss[KEY_FILTER_PREV] = ""
@@ -2148,7 +2145,11 @@ def render_tab_move_log():
     if cur_filter != prev_filter:
         ss[KEY_FILTER_PREV] = cur_filter
         ss[KEY_PAGE] = 1
+        st.rerun()
 
+    # ------------------------------
+    # 필터 적용
+    # ------------------------------
     if lot_filter:
         q = lot_filter.strip().lower()
         df_tmp = df.copy()
@@ -2162,7 +2163,6 @@ def render_tab_move_log():
         st.info("검색 조건에 해당하는 이동 이력이 없습니다.")
         return
 
-    # 최신순
     df_view = df_view.sort_values("시간", ascending=False)
 
     total_rows = len(df_view)
@@ -2177,27 +2177,43 @@ def render_tab_move_log():
 
     page_options = list(range(1, total_pages + 1))
 
-    with col3:
+    # ✅ 이전/다음 버튼
+    with col_prev:
+        prev_clicked = st.button("이전", key="log_page_prev_btn", use_container_width=True)
+    with col_next:
+        next_clicked = st.button("다음", key="log_page_next_btn", use_container_width=True)
+
+    if prev_clicked:
+        ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
+        st.rerun()
+
+    if next_clicked:
+        ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
+        st.rerun()
+
+    # ✅ 페이지 선택 박스 (가운데)
+    with col_page:
         page = st.selectbox(
             "페이지 선택",
             options=page_options,
-            index=page_options.index(ss[KEY_PAGE]),
+            index=page_options.index(int(ss[KEY_PAGE])),
             key=KEY_PAGE,
             label_visibility="collapsed",
         )
 
-    with col4:
+    with col_info:
         st.markdown(
             f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
             f"총 {total_rows}건 · {total_pages}페이지</div>",
             unsafe_allow_html=True,
         )
 
-    start = (page - 1) * page_size
+    start = (int(page) - 1) * page_size
     end = start + page_size
 
     # ✅ 원본 인덱스 유지 (롤백 정확도)
     page_df = df_view.iloc[start:end].copy()
+
 
     # ------------------------------
     # 📱 모바일 공유용 보기 (토글)
