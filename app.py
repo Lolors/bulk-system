@@ -2299,7 +2299,7 @@ def render_tab_move_log():
             st.rerun()
 
     with col_next:
-        if st.button("➡️", key="log_page_next_btn", use_container_width=True):
+        if st.button("다음", key="log_page_next_btn", use_container_width=True):
             ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
             st.rerun()
 
