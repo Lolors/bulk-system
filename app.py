@@ -1663,18 +1663,73 @@ def render_tab_lookup():
     # =========================
     # 1차: bulk CSV 에서 검색
     # =========================
-    # 🔻 1차: CSV에서 검색 결과 없음 → production.xlsx에서 2차 검색
     if df_view.empty:
         if not query:
             st.warning("검색어를 입력해 주세요.")
             return
 
+        q = query.strip()
+        q_lower = q.lower()
+
+        # =========================
+        # 2차: bulk_move_log.csv 에서 "소진" 이력 먼저 확인
+        #  - bulk_drums_extended.csv 에서 소진 통은 삭제되므로,
+        #    이동이력에서 소진 상태인 건을 먼저 보여줌
+        # =========================
+        log_df = load_move_log()
+        if log_df is not None and not log_df.empty and "로트번호" in log_df.columns:
+            tmp = log_df.copy()
+            tmp["lot_lower"] = tmp["로트번호"].astype(str).str.lower()
+
+            # 로트번호 기준: 부분 일치(원하면 == 로 바꿔도 됨)
+            hit = tmp[tmp["lot_lower"].str.contains(q_lower, na=False)].copy()
+
+            if not hit.empty:
+                # "상태" 컬럼이 있는 경우만 "소진" 필터 적용
+                # (없으면 안전하게 '소진 위치'로 추정하는 보완 로직도 같이 넣음)
+                if "상태" in hit.columns:
+                    hit = hit[hit["상태"].astype(str).str.strip() == "소진"].copy()
+                else:
+                    # 보완: 상태 컬럼이 없다면, 변경 후 위치가 소진/폐기면 소진으로 간주
+                    if "변경 후 위치" in hit.columns:
+                        hit["__after_loc"] = hit["변경 후 위치"].astype(str).str.strip()
+                        hit = hit[hit["__after_loc"].isin(["소진", "폐기"])].copy()
+                        hit = hit.drop(columns=["__after_loc"], errors="ignore")
+
+                if not hit.empty:
+                    st.markdown("#### 🧾 소진 이력 검색 결과 (이동 이력 기준)")
+                    st.caption("※ 이 로트는 소진 처리되어 bulk_drums_extended.csv에서 삭제됐을 수 있습니다.")
+
+                    show_cols = [
+                        "시간",
+                        "ID",
+                        "품번",
+                        "품명",
+                        "로트번호",
+                        "통번호",
+                        "변경 전 용량",
+                        "변경 후 용량",
+                        "변화량",
+                        "변경 전 위치",
+                        "변경 후 위치",
+                        "상태",
+                    ]
+                    show_cols = [c for c in show_cols if c in hit.columns]
+
+                    # 최신순 정렬
+                    if "시간" in hit.columns:
+                        hit = hit.sort_values("시간", ascending=False)
+
+                    st.dataframe(hit[show_cols], use_container_width=True)
+                    return
+
+        # =========================
+        # 3차: production.xlsx (제조실 재고 검색 결과)로 폴백
+        # =========================
         prod_df = load_production()
         if prod_df.empty:
-            st.info("bulk CSV와 production.xlsx 모두에서 검색 결과가 없습니다.")
+            st.info("bulk CSV / 이동 이력 / production.xlsx 모두에서 검색 결과가 없습니다.")
             return
-
-        q = query.strip()
 
         # LOTNO / 품명 부분 일치 검색
         mask_prod = (
@@ -1683,17 +1738,11 @@ def render_tab_lookup():
         )
         prod_view = prod_df[mask_prod].copy()
 
-        # 🔹 제조일자(작업일자) 기준 최근 180일 이내만 남기기
-        today = datetime.today()
-        prod_view["작업일자"] = pd.to_datetime(prod_view["작업일자"], errors="coerce")
-        prod_view = prod_view[
-            (today - prod_view["작업일자"]).dt.days <= 180
-        ]
-
         if prod_view.empty:
-            st.info("최근 6개월 이내 제조된 재고가 없습니다.")
+            st.info("bulk CSV / 이동 이력 / production.xlsx 모두에서 검색 결과가 없습니다.")
             return
 
+        # (이 아래는 너가 이미 쓰고 있는 '제조실 재고 검색 결과' 생성 로직 그대로 유지)
         # ===== production 기반 가상 벌크통 생성 =====
         drums_rows = []
 
@@ -1702,7 +1751,6 @@ def render_tab_lookup():
             item_name = str(r["품명"])
             lot = str(r["LOTNO"]).strip().upper()
 
-            # 제조일자(작업일자)에서 날짜만 추출
             raw_date = r["작업일자"]
             try:
                 mfg_date = str(pd.to_datetime(raw_date).date())  # YYYY-MM-DD
@@ -1711,7 +1759,6 @@ def render_tab_lookup():
 
             prod_qty = float(r["제조량"]) if not pd.isna(r["제조량"]) else None
 
-            # 제조량 → 통번호 자동 생성
             drums = generate_drums(prod_qty)
 
             for d in drums:
@@ -1733,8 +1780,6 @@ def render_tab_lookup():
             return
 
         drums_df = pd.DataFrame(drums_rows)
-
-        # TAT 계산
         drums_df = add_tat_column(drums_df)
 
         st.markdown("#### 📄 제조실 재고 검색 결과")
@@ -1757,10 +1802,7 @@ def render_tab_lookup():
             use_container_width=True,
             hide_index=True,
             column_config={
-                "품명": st.column_config.TextColumn(
-                    "품명",
-                    width="large",   # 🔥 이게 핵심: 품명 칸을 넓게 확장
-                )
+                "품명": st.column_config.TextColumn("품명", width="large"),
             },
         )
 
@@ -1768,45 +1810,6 @@ def render_tab_lookup():
             "※ 이 벌크는 아직 이동 이력이 등록되지 않았으며 "
             "제조작업실적현황 기반의 정보입니다."
         )
-        return
-
-
-        # =========================
-        # 2차: production.xlsx 에서 검색
-        # =========================
-        prod_df = load_production()
-        if prod_df.empty:
-            st.warning("검색 결과가 없습니다.")
-            return
-
-        q = query.strip()
-
-        # LOTNO(M열) / 품명(K열) 기준 부분 일치 검색
-        mask_prod = (
-            prod_df["LOTNO"].astype(str).str.contains(q, case=False, na=False)
-            | prod_df["품명"].astype(str).str.contains(q, case=False, na=False)
-        )
-        prod_view = prod_df[mask_prod].copy()
-
-        if prod_view.empty:
-            st.info("bulk CSV와 production.xlsx 어디에서도 검색 결과가 없습니다.")
-            return
-
-        st.markdown("#### 📄 제조실 재고 검색 결과")
-
-        # 위치 컬럼 추가 (고정값: 자사(제조실))
-        prod_view = prod_view.copy()
-        prod_view["위치"] = "자사(제조실)"
-
-        # 보여줄 기본 컬럼들 (제조량 오른쪽에 위치 컬럼 배치)
-        show_cols = ["작업번호", "품번", "품명", "LOTNO", "제조량", "위치", "작업일자"]
-        show_cols = [c for c in show_cols if c in prod_view.columns]
-
-        st.dataframe(
-            prod_view[show_cols].sort_values("작업일자", ascending=False),
-            use_container_width=True,
-        )
-        st.caption("※ 이 로트는 아직 bulk_drums_extended.csv 에 등록되지 않았을 수 있습니다.")
         return
 
     # 🔻 여기부터는 CSV에서 검색 결과가 있는 경우 기존 로직 그대로
