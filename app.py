@@ -2278,10 +2278,10 @@ def render_tab_move_log():
     # ------------------------------
     # ✅ 페이지네이션 + 삭제 버튼 (같은 줄)
     # ------------------------------
-    col_prev, col_page, col_next, col_info, col_delete = st.columns([1.1, 1.8, 1.1, 2.5, 2.0])
+    col_prev, col_page, col_next, col_info, col_delete = st.columns([1.1, 1.0, 1.1, 2.5, 2.0])
 
     with col_prev:
-        if st.button("⬅️ 이전", key="log_page_prev_btn", use_container_width=True):
+        if st.button("이전", key="log_page_prev_btn", use_container_width=True):
             ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
             st.rerun()
 
@@ -2299,7 +2299,7 @@ def render_tab_move_log():
             st.rerun()
 
     with col_next:
-        if st.button("다음 ➡️", key="log_page_next_btn", use_container_width=True):
+        if st.button("➡️", key="log_page_next_btn", use_container_width=True):
             ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
             st.rerun()
 
