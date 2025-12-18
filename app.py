@@ -2119,8 +2119,7 @@ def render_tab_move_log():
         ss[KEY_FILTER_PREV] = ""
         ss[KEY_PAGE] = 1
         ss[KEY_MOBILE] = False
-        st.rerun()
-
+ 
     # ------------------------------
     # 검색 UI (한 줄)
     # ------------------------------
@@ -2279,7 +2278,6 @@ def render_tab_move_log():
     with col_prev:
         if st.button("이전", key="log_page_prev_btn", use_container_width=True):
             ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
-            st.rerun()
 
     with col_page:
         page_options = list(range(1, total_pages + 1))
@@ -2292,12 +2290,10 @@ def render_tab_move_log():
         )
         if int(new_page) != int(ss[KEY_PAGE]):
             ss[KEY_PAGE] = int(new_page)
-            st.rerun()
 
     with col_next:
         if st.button("다음", key="log_page_next_btn", use_container_width=True):
             ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
-            st.rerun()
 
     with col_info:
         st.markdown(
