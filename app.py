@@ -2272,33 +2272,45 @@ def render_tab_move_log():
 
     # ------------------------------
     # ✅ 페이지네이션 + 삭제 버튼 (같은 줄)
+    #   - KEY_PAGE 하나만 "진짜 페이지"로 사용
+    #   - selectbox는 key 없이(혹은 고유 key) + value를 KEY_PAGE로 동기화
+    #   - 이전/다음/선택 변경 시 rerun 필수
     # ------------------------------
     col_prev, col_page, col_next, col_info, col_delete = st.columns([1.1, 1.0, 1.1, 2.5, 2.0])
 
     with col_prev:
         if st.button("이전", key="log_page_prev_btn", use_container_width=True):
             ss[KEY_PAGE] = max(1, int(ss[KEY_PAGE]) - 1)
+            st.rerun()
 
     with col_page:
         page_options = list(range(1, total_pages + 1))
+
+        # ✅ 현재 페이지를 index로 반영
+        cur_page = int(ss.get(KEY_PAGE, 1))
+        cur_page = min(max(1, cur_page), total_pages)
+
         new_page = st.selectbox(
             "페이지 선택",
             options=page_options,
-            index=page_options.index(int(ss[KEY_PAGE])),
-            key="log_page_selectbox_bottom",
+            index=page_options.index(cur_page),
+            key="log_page_selectbox_bottom_v2",  # ✅ 기존 key랑 충돌 나면 꼭 v2처럼 바꿔
             label_visibility="collapsed",
         )
+
         if int(new_page) != int(ss[KEY_PAGE]):
             ss[KEY_PAGE] = int(new_page)
+            st.rerun()
 
     with col_next:
         if st.button("다음", key="log_page_next_btn", use_container_width=True):
             ss[KEY_PAGE] = min(total_pages, int(ss[KEY_PAGE]) + 1)
+            st.rerun()
 
     with col_info:
         st.markdown(
             f"<div style='padding-top:6px; font-size:0.9rem; text-align:right;'>"
-            f"페이지 {page} / {total_pages} · 총 {total_rows}건</div>",
+            f"페이지 {int(ss[KEY_PAGE])} / {total_pages} · 총 {total_rows}건</div>",
             unsafe_allow_html=True,
         )
 
@@ -2378,6 +2390,7 @@ def render_tab_move_log():
 
             st.success(f"총 {len(selected_idx)}개 이동 이력이 삭제되고, 관련 통 정보가 롤백되었습니다.")
             st.rerun()
+
 
 # ==============================
 # 탭 5: 데이터 파일 관리
